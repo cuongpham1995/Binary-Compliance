@@ -1,0 +1,530 @@
+---
+title: "Data Application"
+author: "Cuong Pham"
+date: "1/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Prepare the data set
+### Import data set
+
+```{r}
+#this function w, generate the w(alpha1, alpha0, y)
+w<-function(y, alpha0, alpha1){
+  expit(alpha0 +alpha1*y)
+}
+
+
+expit<-function(x){
+  exp(x)/(1+exp(x))
+}
+#This script processes the raw data
+library(haven)
+library(tidyverse)
+#Read in data
+dat_raw <- haven::read_sas("C:\\Users\\cpham\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\ashkan.sas7bdat")
+#dat_raw <- haven::read_sas("C:\\Users\\cuong\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\ashkan.sas7bdat")
+
+#Select relevant features
+dat <- dat_raw %>% select("aa",
+                          "male",
+                          "higheduc",
+                          "subjectid",
+                          "week",
+                          "StudyDay001",
+                          "TxIntakeDate",
+                          "Study",
+                          "engagedwk2",
+                          "wk3to8status",
+                          "Wk2Randdate",
+                          "Wk2AttStatus",
+                          "Wk8AttStatus",
+                          "Wk2Cond",
+                          "ApptNumbers",
+                          "ApptAttend",
+                          "PropAttend",
+                          "iop",
+                          "Wk8RandDate",
+                          "DaysMiss",
+                          "further",
+                          "DaysAlc",
+                          "DaysCoc",
+                          "DaysHeavy")
+
+
+```
+
+### Clean data set
+
+```{r}
+#data manipulation
+
+#MI-IOP in stage 1
+dat_IOP_stage_1 <- dat %>% group_by(subjectid) %>% filter(engagedwk2 == 0)%>% filter(iop == 0)
+
+#MI-PC in stage 1
+dat_PC_stage_1 <- dat %>% group_by(subjectid) %>% filter(engagedwk2 == 0)%>% filter(iop == 1)
+
+
+
+dat_combined <- rbind(dat_IOP_stage_1, dat_PC_stage_1)
+
+#Stage_1 treatment indicator
+dat3 <-dat_combined %>% mutate(a1= 2*(iop == 1)-1)
+
+dat4 = dat3 %>% filter(week >2 & week < 9) %>% select(subjectid, aa, male, higheduc, week, ApptNumbers, ApptAttend, PropAttend, DaysAlc, DaysCoc, DaysHeavy, a1) 
+
+#there are 162 data point 
+length(unique(dat4$subjectid))
+length(unique(dat4$subjectid[!is.na(dat4$PropAttend)])) #checking number of unique subject
+
+#dat4[dat4$subjectid == 4520, ]
+
+compl.dat = dat4 %>% group_by(subjectid) %>% summarise(aa = max(aa), male = max(male), higheduc = max(higheduc), trt = max(a1),
+                                                       total_appt = sum(ApptNumbers, na.rm = T), 
+                                                       total_attend = sum(ApptAttend, na.rm = T),
+                                                       percent_day_al = sum(DaysAlc)/28,
+                                                       percent_day_co = sum(DaysCoc)/28,
+                                                       percent_day_alh = sum(DaysAlc)/28) %>% mutate(Prop.attend = total_attend/total_appt)
+
+dat.outcomes = dat4[dat4$week == 8, c("subjectid", "DaysAlc", "DaysCoc", "DaysHeavy")]
+dat.final = full_join(compl.dat, dat.outcomes, by = "subjectid")
+dat.final = dat.final[!is.na(dat.final$DaysAlc) & !is.na(dat.final$Prop.attend),]
+dat.final$DaysAlc.bi = ifelse(dat.final$DaysAlc > 0,1,0)
+dat.final$DaysCoc.bi = ifelse(dat.final$DaysCoc > 0,1,0)
+dat.final$DaysHeavy.bi = ifelse(dat.final$DaysHeavy >0,1,0)
+#dat.final$subjectid[dat.final$total_appt == 5]
+#dat4[dat4$subjectid == 4165,]
+
+dat.final$compl = ifelse(dat.final$Prop.attend >= median(dat.final$Prop.attend), dat.final$trt,0)
+hist(dat.final$Prop.attend)
+dat.final %>% summary()
+```
+
+```{r}
+#Supplemental smoking and treatment episode questionnaire ssste
+#dat_ssste <- read_sav("ssste.SAV")
+dat_ssste <- read_sav("C:\\Users\\cpham\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\De-Identifed\\SSSTE.SAV") %>% as.data.frame()
+
+#dat_ssste <- read_sav("C:\\Users\\cuong\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\De-Identifed\\SSSTE.SAV") %>% as.data.frame()
+
+dat_ssste <- dat_ssste %>% select("ID",
+                                  "SSQ003")
+
+dat_ssste_dat_for_analysis <- dat_ssste %>% rename(subjectid = ID,
+                                                   smoke_baseline = SSQ003) %>%
+  group_by(subjectid)
+
+
+dat_ssste_dat_for_analysis$smoke_baseline[which(is.na(dat_ssste_dat_for_analysis$smoke_baseline))] <- 0
+
+#######
+
+dat.final <- left_join(dat.final,dat_ssste_dat_for_analysis)
+
+
+#####################
+#SF-12 includes general health and emotional health
+SF12_V2 <- read_sav("C:\\Users\\cpham\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\De-Identifed\\SF12_V2.SAV")
+#SF12_V2 <- read_sav("C:\\Users\\cuong\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\De-Identifed\\SF12_V2.SAV")
+
+SF12_V2 <- SF12_V2 %>% rename(subjectid=ID)
+
+#Your health in general
+SF12_V2_baseline_GH <- SF12_V2 %>% group_by(subjectid) %>% filter(Week==0,subjectid %in% dat.final$subjectid) %>% select(SF12001) %>% rename(GH_baseline=SF12001) %>% as.data.frame()
+
+
+SF12_V2_baseline_Emotional <- SF12_V2 %>% group_by(subjectid) %>% filter(Week==0,subjectid %in% dat.final$subjectid) %>% select(SF12004A) %>% rename(emotional_baseline = SF12004A) %>% as.data.frame()
+
+dat_temp <- SF12_V2_baseline_GH %>% right_join(SF12_V2_baseline_Emotional)
+
+###Treatment motivation scale: contains treatment readiness score or TR
+tms <- read_sav("C:\\Users\\cpham\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\De-Identifed\\TMS.SAV")
+#tms <- read_sav("C:\\Users\\cuong\\Box\\ENGAGE-Cuong\\MCKAY-ATACD-ROCHESTER\\De-Identifed\\TMS.SAV")
+
+tms <- tms %>% rename(subjectid=ID)
+
+#Treatment readiness
+tms_baseline <- tms %>% group_by(subjectid) %>% filter(Week == 0, subjectid %in% dat.final$subjectid) %>% select("TR") %>% rename(TxReadiness_baseline = TR)
+
+dat_temp <- tms_baseline %>% full_join(dat_temp)
+#############
+
+dat.final <- dat.final %>% full_join(dat_temp)
+
+dat.final2 = dat.final[!is.na(dat.final$TxReadiness_baseline),]
+
+
+```
+
+```{r}
+
+#cocain usage as the outcome
+dat.coc.bi = dat.final2 %>% select(aa, male, higheduc, smoke_baseline, TxReadiness_baseline, GH_baseline, emotional_baseline, trt, compl, DaysCoc.bi) %>% as.data.frame()
+
+
+```
+
+
+```{r warning=FALSE}
+#this function analyze the data and give the value function for each of the value of 
+#alpha+ and alpha-
+#We assume that alpha0's are known and equal to 0
+fit.compliance.mod.alc = function(seed, alpha0_n1 = 0, alpha0_p1 = 0, alpha_n1, alpha_p1, kernel.type = "linear"){
+  tryCatch({ set.seed(seed)
+    require(locClass)
+    require(dplyr)
+    require(matrixStats)
+    require(hal9001)
+    require(nnet)
+    dat =  as.data.frame(dat.coc.bi)
+    colnames(dat) = c("L1", "L2", "L3", "L4", "L5", "L6", "L7", "Z", "A", "outcome")
+    dat$train = rbinom(nrow(dat), size = 1, prob = 0.7) #perform cross validation (70% train and 30% test set)
+  
+    #calculate the weight w+ for Z = 1 and w- for Z = -1
+    dat$wd = ifelse(dat$Z == -1, w(dat$outcome, alpha0_n1, alpha_n1), w(dat$outcome, alpha0_p1, alpha_p1))
+    
+    ############calculate propensity score
+    #propensity score is correctly specified
+    mod.logit  = glm(as.factor(Z) ~ L1 + L2 + L3 + L4 + L5 + L6 + L7, data = dat, family = binomial(link = logit))
+    fz = predict(mod.logit, type = "response")
+    fz = ifelse(dat$Z == 1, fz, 1 - fz)
+    dat$fz = 0.5 #propensity score
+    
+    #p(A|Z,X) are correctly specified
+    mod.multi = multinom(A ~ Z + L1 + L2 + L3 + L4 + L5 + L6 + L7, data = dat, trace = FALSE)
+    faz = predict(mod.multi, type = "prob")
+    dat$faz = ifelse(dat$Z == 1,faz[,3],faz[,1]) #p(A|Z,X).
+    
+    ############### Doubly Robust Estimator##############################
+ 
+    #calculate E[yw+ | A = 1, Z = 1, L1, L2, L3]
+    #Q+ and gamma+ are correctly specified
+    mod.glm = glm(outcome ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$Z == 1 & dat$A == 1, ], family = binomial(link = "logit"))
+    sum.modglm = summary(mod.glm)
+    coef.p = sum.modglm$coefficients[,1]
+    Ey.wp = p.gammap = NA
+    
+    for(i in 1:nrow(dat)){
+      temp.yp = rbinom(5000, 1, expit(coef.p[1] + coef.p[2]*dat$L1[i] + coef.p[3]*dat$L2[i] + coef.p[4]*dat$L3[i] + 
+                                        coef.p[5]*dat$L4 + coef.p[6]*dat$L5 + coef.p[7]*dat$L6 + coef.p[8]*dat$L7)) #the true model for yp (y positive) has only intercept
+      Ey.wp[i] = mean(temp.yp*w(temp.yp,alpha0 = alpha0_p1, alpha1 = alpha_p1)) #calculate E[Yw+| A = Z = 1, L]
+      p.gammap[i] = mean(w(temp.yp, alpha0 = alpha0_p1, alpha1 = alpha_p1)) #calculate gamma+ (E[w+| A = Z = 1, L])
+    }
+    
+    dat$Ey.wp = Ey.wp  #E[Yw+| A = Z = 1, L]
+    dat$p.gammap = p.gammap #E[w+| A = Z = 1, L]
+    
+    #calculate E[yw- | A = -1, Z = -1, L]
+    #Q- and gamma- are corretly specified
+    mod.lm2 = glm(outcome ~  L1 + L2 + L3 + L4 +L4+ L5 +  L6 + L7, data = dat[dat$Z == -1 & dat$A == -1, ], family = binomial(link = "logit"))
+    sum.modlm2 = summary(mod.lm2)
+    coef.n = sum.modlm2$coefficients[,1]
+    Ey.wn = p.gamman = NA
+    
+    for(i in 1:nrow(dat)){
+      temp.yn = rbinom(5000, 1, expit(coef.n[1] + coef.n[2]*dat$L1[i] + coef.n[3]*dat$L2[i] + coef.n[4]*dat$L3[i] + 
+                                        coef.n[5]*dat$L4 + coef.n[6]*dat$L5 + coef.n[7]*dat$L6 + coef.n[8]*dat$L7))
+      Ey.wn[i] = mean(temp.yn*w(temp.yn,alpha0 = alpha0_n1, alpha1 = alpha_n1)) #calculate E[Yw-|A = Z = -1, L]
+      p.gamman[i] = mean(w(temp.yn, alpha0 = alpha0_n1, alpha1 = alpha_n1)) #calculate gamma- (E[w-|A= Z = -1, L]) 
+    }
+    
+    dat$Ey.wn = Ey.wn
+    dat$p.gamman = p.gamman
+    dat$gamma = ifelse(dat$Z == 1, p.gammap, p.gamman)
+
+    
+    #multiple robust estimator for E[Y1|PI = 4, L]
+    delta.p = dat$Ey.wp/dat$p.gammap #calculate E[yw+| A=Z=1, L]/E[w+| A=Z=1, L] 
+    term.p = delta.p + (dat$A*(dat$A+dat$Z)*(dat$A + 1))/(4*dat$fz*dat$faz*dat$p.gammap)*(dat$outcome*dat$wd - dat$Ey.wp - delta.p*(dat$wd - dat$p.gammap))
+    
+    #multiple robust estimator for E[Y-1|PI = 4, L]
+    delta.n = dat$Ey.wn/dat$p.gamman
+    term.n = delta.n + (dat$A*(dat$A+dat$Z)*(1 - dat$A))/(4*dat$fz*dat$p.gamman*dat$faz)*(dat$outcome*dat$wd - dat$Ey.wn - delta.n*(dat$wd - dat$p.gamman))
+    
+    dat$delta.p = delta.p
+    dat$delta.n = delta.n
+    dat$delta = ifelse(dat$Z == 1, dat$delta.p, dat$delta.n)
+    
+    dat$mr = dat$Z*(term.p - term.n) #the weight for SVM is Z*delta
+    dat$lab = sign(dat$mr)*dat$Z
+    
+    mod.mr = wsvm(as.factor(lab) ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$train == 1,], case.weights = abs(dat$mr[dat$train==1]), kernel = kernel.type, 
+                  cross = 10, scale =  F)
+    
+    #############################################################
+    #############################################################
+    #tchetgen and proportion and OWL method
+    
+    dat$w = (dat$A*(dat$Z+dat$A)*dat$outcome*dat$wd)/(2*dat$gamma*dat$fz*dat$faz) # proposed weight
+    dat$w2 = (dat$Z*dat$A*dat$outcome)/dat$fz #Tchetgen weight
+    dat$w3 = dat$outcome/dat$fz #OWL weight
+    
+    dat$lab = sign(dat$w)*dat$Z
+    dat$lab2 = sign(dat$w2)*dat$Z
+    dat$lab3 = sign(dat$w3)*dat$Z
+    
+    
+    #models building
+    mod.prop = wsvm(as.factor(lab) ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$A==dat$Z & dat$train == 1,], case.weights = abs(dat$w[dat$A==dat$Z & dat$train == 1]), kernel = kernel.type, 
+                    cross = 10, scale =  F)
+    
+    mod.tchetgen = wsvm(as.factor(lab2) ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$A!=0 & dat$train == 1,], case.weights = abs(dat$w2[dat$A!=0 & dat$train == 1]), kernel = kernel.type, 
+                        cross = 10, scale =  F)
+    
+    mod.owl = wsvm(as.factor(lab3) ~ L1 + L2 + L3  + L4 + L5 +  L6 + L7, data = dat[dat$train == 1,], case.weights = abs(dat$w3[dat$train == 1]), kernel = kernel.type, 
+                   cross = 10, scale =  F)
+    
+    #Classifying 
+    dat = dat[dat$train == 0, ]
+    
+    fitted.prop = predict(mod.prop, newdata = dat[dat$train == 0,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat$fitted.prop = as.numeric(as.character(fitted.prop))
+  
+    fitted.owl = predict(mod.owl, newdata = dat[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat$fitted.owl = as.numeric(as.character(fitted.owl))
+    
+    fitted.tchetgen = predict(mod.tchetgen, newdata = dat[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat$fitted.tchetgen = as.numeric(as.character(fitted.tchetgen))
+    
+    fitted.mr = predict(mod.mr, newdata = dat[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat$fitted.mr = as.numeric(as.character(fitted.mr))
+
+  
+       dat$PI = ifelse(dat$Z == dat$A, 1, 0)
+    #return(dim(dat))
+    X.mat = matrix(c(rep(1, length(dat$L1)),dat$L1, dat$L2, dat$L3, dat$L4, dat$L5, dat$L6, dat$L7, dat$Z, dat$PI), ncol = 10)
+   # return(dim(X.mat))
+    hal.mod1 = fit_hal(X = X.mat, Y = I(dat$outcome*dat$wd/(dat$faz*dat$gamma) ), family = "gaussian", yolo = F)
+    
+    dat$EAYw = predict(hal.mod1, new_data = matrix(c(rep(1, length(dat$L1)),dat$L1, dat$L2, dat$L3, dat$L4, dat$L5, dat$L6, dat$L7,dat$Z, dat$PI), ncol = 10)) 
+    
+    dat$EAYwn = predict(hal.mod1, new_data = matrix(c(rep(1, length(dat$L1)),dat$L1, dat$L2, dat$L3, dat$L4, dat$L5, dat$L6, dat$L7, rep(-1, length(dat$L1)), dat$PI), ncol = 10))
+    
+    dat$EAYwp = predict(hal.mod1, new_data = matrix(c(rep(1, length(dat$L1)),dat$L1, dat$L2, dat$L3, dat$L4, dat$L5, dat$L6, dat$L7, rep(1, length(dat$L1)), dat$PI), ncol = 10))
+
+    
+    
+    ############ Multiply robust estimator of the value function ############################  
+    mr.value = function(fit, dat){
+  
+    term1 = ((fit == dat$Z)*dat$outcome*dat$wd)/(dat$gamma*dat$fz*dat$faz )
+    
+    term2.1 = (fit == dat$Z)*dat$EAYw/dat$fz
+    term2.2 = (fit == 1)*dat$EAYwp + (fitted.prop == -1)*dat$EAYwn
+
+    
+    term3.1 =  (fit == 1)*dat$delta.p*(dat$A == dat$Z & dat$Z == 1)*(dat$wd - dat$gamma)/(dat$fz*dat$faz)
+    term3.2 = (fit == -1)*dat$delta.n*(dat$A == dat$Z & dat$Z == -1)*(dat$wd - dat$gamma)/(dat$fz*dat$faz)
+
+    
+    
+    term4.1 = (dat$A == dat$Z)*(fit == dat$Z)*dat$delta/(dat$fz*dat$faz)
+    term4.2 = (dat$Z ==1)*(fit == dat$Z)*dat$delta.p/dat$fz + 
+      (dat$Z == -1)*(fit == dat$Z)*dat$delta.n/dat$fz
+    
+   
+    value.function.mr = mean(term1 - (term2.1 - term2.2) - (term3.1 + term3.2) - (term4.1 - term4.2))
+    return(value.function.mr)
+}
+
+value.function = function(fit, dat){
+  term1 = ((fit == dat$Z)*dat$outcome*dat$wd)/(dat$gamma*dat$fz*dat$faz )
+  return( mean(term1))
+}
+
+    mr.vl.prop = mr.value(fit = dat$fitted.prop, dat = dat)
+    mr.vl.mr.prop = mr.value( fit =  dat$fitted.mr, dat = dat)
+    mr.vl.eric = mr.value(fit =  dat$fitted.tchetgen, dat = dat)
+    mr.vl.owl = mr.value(fit =  dat$fitted.owl, dat = dat)
+    
+   
+    ########### Value Function Estimator (non-robust)
+    vl.prop = value.function(fit =  dat$fitted.prop, dat = dat)
+    vl.mr.prop = value.function(fit =  dat$fitted.mr, dat = dat)
+    vl.eric = value.function(fit = dat$fitted.tchetgen, dat = dat)
+    vl.owl = value.function(fit =  dat$fitted.owl, dat = dat)
+    
+    result = c(mr.vl.prop, mr.vl.mr.prop, mr.vl.eric, mr.vl.owl, vl.prop, vl.mr.prop, vl.eric, vl.owl)
+    names(result) = c("Value function proposed method (MR)", "Value function MR proposed method (MR)", "Value Function Eric (MR)", "Value Function OWL (MR)", "Value function proposed method", "value function MR proposed method", "Value Function Eric", "Value Function OWL")
+    return(result)
+}, error = function(error_message){
+    message(error_message)
+    return(NA)
+  })
+  
+}
+
+#12234
+fit.compliance.mod.alc(seed = 4367, alpha0_n1 = 0, alpha0_p1 = 0, alpha_n1 = 0.5, alpha_p1 = 0.5)
+```
+
+
+## Value Function Sensitivity Analysis
+
+```{r warning=FALSE}
+#Sensitivity Analysis
+#set grid for the possible combinations of alpha
+alpha.grid = expand.grid(alpha_n = seq(-1,1,length.out = 20), alpha_p = seq(-1,1, length.out = 20))
+
+
+set.seed(1)
+sampled.seed = sample(1:100000, 500)
+
+
+heat.df2 = list()
+
+for(i in 1:105){
+  print(i)
+  value.all.alpha = mapply(fit.compliance.mod.alc, seed = sampled.seed[i],  alpha0_n1 = 0, alpha0_p1 = 0, 
+                           alpha_n1 = alpha.grid$alpha_n, alpha_p1 = alpha.grid$alpha_p) 
+  
+  heat.df = cbind(alpha.grid,t(value.all.alpha))
+   if(sum(is.na(heat.df)) > 0){
+     #Eliminate the bad cases
+    heat.df2[[i]] = 0
+    
+   } else {
+     #calculate the difference of the value function betwwen IPW method and method proposed by Cui and Tchetgen
+    heat.df$diff.IPW.Eric = heat.df$`Value function proposed method (MR)` - heat.df$`Value Function Eric (MR)`
+    #calculate the difference of the value function between the multiply robust estimator  and the method proposed by Cui and Tchetgen
+  heat.df$diff.MR.Eric = heat.df$`Value function MR proposed method (MR)` - heat.df$`Value Function Eric (MR)`
+ 
+  #save  the result in a list
+  heat.df2[[i]] = as.matrix(heat.df)  
+  }
+  
+  
+}
+
+#sum up the list in heat.df2
+heat.df.sum = 0
+
+for(i in 1:105){
+  heat.df.temp = heat.df2[[i]]
+  heat.df.sum = heat.df.sum + heat.df.temp
+}
+
+#caclulate the mean of each grid in the heat map
+heat.df.mean = heat.df.sum/95
+
+#calculate the variance using resampling
+heat.df.diff.sq = 0 
+for(i in 1:105){
+  
+  if(sum(heat.df2[[i]]) != 0){
+    heat.df.temp = (heat.df2[[i]] - heat.df.mean)^2
+   #print(heat.df.temp[[1]][1])
+  heat.df.diff.sq = heat.df.diff.sq + heat.df.temp
+  }
+  
+}
+
+#construct the estimated 95% CI
+heat.df.var = (1/94)*heat.df.diff.sq
+heat.df.sd = sqrt(heat.df.var)
+heat.df.lower.bound = heat.df.mean - 1.96*heat.df.sd 
+heat.df.upper.bound = heat.df.mean + 1.96*heat.df.sd 
+
+heat.df.IPW.Eric = data.frame(alpha_n = heat.df.mean[,"alpha_n"], alpha_p = heat.df.mean[,"alpha_p"] ,est.mean = heat.df.mean[,"diff.IPW.Eric"], lower.bound = heat.df.lower.bound[,"diff.IPW.Eric"], upper.bound = heat.df.upper.bound[,"diff.IPW.Eric"])
+heat.df.IPW.Eric$IPW.greater = ifelse(heat.df.IPW.Eric$est.mean > 0, T, F)
+heat.df.IPW.Eric$Significant = ifelse(heat.df.IPW.Eric$lower.bound <0 & 0 < heat.df.IPW.Eric$upper.bound, F,T)
+
+
+
+heat.df.MR.Eric = data.frame(alpha_n = heat.df.mean[,"alpha_n"], alpha_p = heat.df.mean[,"alpha_p"] ,est.mean = heat.df.mean[,"diff.MR.Eric"], lower.bound = heat.df.lower.bound[,"diff.MR.Eric"], upper.bound = heat.df.upper.bound[,"diff.MR.Eric"])
+heat.df.MR.Eric$MR.greater = ifelse(heat.df.MR.Eric$est.mean > 0, T, F)
+heat.df.MR.Eric$Significant = ifelse(heat.df.MR.Eric$lower.bound <0 & 0 < heat.df.MR.Eric$upper.bound, F,T)
+
+#Plots the difference of value function between the two methods
+#IPW vs Eric
+  plot.IPW1 = ggplot(data = heat.df.IPW.Eric, aes(alpha_n, alpha_p, fill =est.mean)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+  labs(title =  "IPW Method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"))
+   
+  plot.IPW2 = ggplot(data = heat.df.IPW.Eric, aes(alpha_n, alpha_p, fill = IPW.greater )) + 
+  geom_tile() + labs(title =  "IPW Method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+  
+  plot.IPW3 = ggplot(data = heat.df.IPW.Eric, aes(alpha_n, alpha_p, fill = Significant )) + 
+  geom_tile() + labs(title =  "Is the difference significant", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+
+  grid.arrange(plot.IPW1, plot.IPW2, plot.IPW3, ncol = 2)
+#MR vs Eric
+  plot.MR.1 = ggplot(data = heat.df.MR.Eric, aes(alpha_n, alpha_p, fill =est.mean)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+  labs(title =  "MR method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"))
+   
+  plot.MR.2 = ggplot(data = heat.df.MR.Eric, aes(alpha_n, alpha_p, fill = as.factor(MR.greater) )) + 
+  geom_tile() + labs(title =  "MR method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+  
+  plot.MR.3 = ggplot(data = heat.df.MR.Eric, aes(alpha_n, alpha_p, fill = as.factor(Significant) )) + 
+  geom_tile() + labs(title =  "Is the difference significant?", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+  
+   grid.arrange(plot.MR.1, plot.MR.2, plot.MR.3, ncol = 2)
+```
+
+```{r}
+heat.df1 = as.data.frame(heat.df.mean)
+library(ggplot2)
+library(gridExtra)
+heat.df1$Eric.OWL = heat.df1$`Value Function Eric (MR)` > heat.df1$`Value Function OWL (MR)`
+
+heat.df1$IPW.OWL = heat.df1$`Value function proposed method (MR)` > heat.df1$`Value Function OWL (MR)`
+heat.df1$IPW.OWL2 = heat.df1$`Value function proposed method (MR)` - heat.df1$`Value Function OWL (MR)`
+
+heat.df1$MR.OWL = heat.df1$`Value function MR proposed method (MR)` > heat.df1$`Value Function OWL (MR)`
+heat.df1$MR.OWL2 = heat.df1$`Value function MR proposed method (MR)` - heat.df1$`Value Function OWL (MR)`
+
+rgn = range(c(heat.df1$`Value function proposed method (MR)`, heat.df1$`Value function MR proposed method (MR)`,
+              heat.df1$`Value Function Eric (MR)`, heat.df1$`Value Function OWL (MR)`)) #scale of correct rate
+ 
+
+   #The difference of the value function between the OWL method and the multiply robust emthod
+ plot.MR.OWL = ggplot(data = heat.df1, aes(alpha_n, alpha_p, fill = MR.OWL)) + 
+  geom_tile() + labs(title =  "MR method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+ 
+ plot.MR.OWL2 = ggplot(data = heat.df1, aes(alpha_n, alpha_p, fill = MR.OWL2)) + 
+  geom_tile()  + scale_fill_gradient(low="white", high="dodgerblue4" )  + labs(title =  "MR method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"))
+  
+ #the difference of the value function between the OWL method and the IPW method 
+ plot.OWL.IPW =  ggplot(data = heat.df1, aes(alpha_n, alpha_p, fill = IPW.OWL)) + 
+  geom_tile() + labs(title =  "IPW method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+ 
+ plot.OWL.IPW2 =  ggplot(data = heat.df1, aes(alpha_n, alpha_p, fill = IPW.OWL2)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + labs(title =  "IPW method", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"))
+ 
+  plot.OWL.Eric =  ggplot(data = heat.df1, aes(alpha_n, alpha_p, fill = Eric.OWL)) + 
+  geom_tile() + labs(title =  "Eric greater than OWL", x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+    
+  
+  #create the plots that we use in the paper 
+   grid.arrange(plot.MR.1, plot.MR.2, 
+                plot.IPW1, plot.IPW2, ncol = 2)
+   
+   grid.arrange(plot.MR.OWL2, plot.MR.OWL,
+                plot.OWL.IPW2, plot.OWL.IPW,ncol = 2)
+   
+ 
+```
+
+
