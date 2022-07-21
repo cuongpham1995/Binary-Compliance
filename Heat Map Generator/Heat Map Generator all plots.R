@@ -27,10 +27,10 @@ library(latex2exp)
  
 
 #specify the path 
- path.all.correct = "C:\\Users\\cpham\\Box\\Cuong Pham-Reading Course\\BlueHive\\Simulation 4 (New)\\Sample size 500\\alpha0 correct\\output_-0.5 0.5 500 all correct"
- path.fz.mis = "C:\\Users\\cpham\\Box\\Cuong Pham-Reading Course\\BlueHive\\Simulation 4 (New)\\Sample size 500\\alpha0 correct\\output_-0.5 0.5 500 fz mis"
- path.faz.mis = "C:\\Users\\cpham\\Box\\Cuong Pham-Reading Course\\BlueHive\\Simulation 4 (New)\\Sample size 500\\alpha0 correct\\output_-0.5 0.5 500 faz mis"
- path.Q.mis = "C:\\Users\\cpham\\Box\\Cuong Pham-Reading Course\\BlueHive\\Simulation 4 (New)\\Sample size 500\\alpha0 correct\\output_-0.5 0.5 500 Q mis"
+ path.all.correct = "C:\\Users\\cuong\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 all correct"
+ path.fz.mis = "C:\\Users\\cuong\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 fz mis"
+ path.faz.mis = "C:\\Users\\cuong\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 faz mis"
+ path.Q.mis = "C:\\Users\\cuong\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 Q mis"
 
 
  #create the plot 
@@ -66,14 +66,14 @@ gen.heat.map = function(path1, n = 500, type.method, plot.name){
     scale_x_continuous(breaks = seq(-1.5,1.5, 0.5) )
   
   plot13 = ggplot(data = heat.df.dat1, aes(alpha_n, alpha_p, fill = eval(parse(text = t.value)) )) + 
-    geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4",  limits = c(rgn2[1], rgn2[2]), breaks = c(1.58,1.59)) + 
+    geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4",  limits = c(rgn2[1], rgn2[2])) + 
     labs(title = TeX("Value Function ($\\alpha_0$ correctly specified)", bold = T), x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
     theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
           legend.key.width = unit(1.5, "cm")) #+ scale_size_continuous(range = c(1.58,1.60),breaks = c(1.581,1.59)) 
   
   
   plot14 = ggplot(data = heat.df.dat2, aes(alpha_n, alpha_p, fill = eval(parse(text = t.value)) )) + 
-    geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4", limits = c(rgn2[1], rgn2[2]), breaks = c(1.580,1.59) ) + 
+    geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4", limits = c(rgn2[1], rgn2[2]) ) + 
     labs(title = TeX("Value Function ($\\alpha_0$ incorrectly specified)"), x = "\u03b1-", y = "\u03b1+", fill = "Value Function") + 
     theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
           legend.key.width = unit(1.5,"cm")) +
