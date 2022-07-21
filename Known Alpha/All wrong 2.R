@@ -42,7 +42,7 @@ bi.sim.wrong = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 = 0
     
     dat$fz =  rep(0.5, size)
     
-    # calculate the probability of A given Z and L are correctly specified 
+    # calculate the probability of A given Z and L is not correctly specified 
     #f(A|Z,L) is incorrectly specified
     
     dat$faz = rep(0.5, size) 
