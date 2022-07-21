@@ -306,11 +306,11 @@ bi.sim.faz.mis = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     #calculate the value function for the method proposed in Eric's using regular value function formula (non-robust)
     value.tchetgen.th = mean((test.df$Ie*test.df$outcome*test.df$wd2)/(test.df$p.gamma*test.df$fz*test.df$faz+2*(test.df$p.gamma==0) ))
     
-    #calculate the value function for the robust estimator method using regular non-robust value function estimator
+    #calculate the value function for the method proposed in Eric's using the robust value function formula
     value.mr.th =  mean((test.df$Ir*test.df$outcome*test.df$wd2)/(test.df$p.gamma*test.df$fz*test.df$faz+2*(test.df$p.gamma==0) ))
     
     #######################################
-    #Return the value
+    #Return the value #####################
     
     result = c(true.value.func, value.prop.mc, value.function.est,value.function.mr, mean(term2.1), mean(term2.2), mean(term4.1), mean(term4.2), 
                correct.rate1, value.tchetgen.mc, value.tchetgen.th, correct.rate.tchetgen, value.owl.mc, correct.rate.owl, 
