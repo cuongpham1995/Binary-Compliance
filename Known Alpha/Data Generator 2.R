@@ -1,6 +1,5 @@
 ####This file contains the functions that use in the binary compliance simulation
 ####In line 42, we can find the function "gen.compl.data" This is the function that generate the binary compliance data
-####In line 194, we can find the function "svm.coef". This function returns the equation for decision boundary line for svm
 #########################################################################
 
 
@@ -23,22 +22,28 @@ fIV = function(y, alpha0, alpha1, mu, sigma, gamma){
   w(y, alpha0, alpha1)*dnorm(y,mu,sigma)/gamma
 }
 
-
-
+#generate the covariate and unmeasured confounder
 cov.gen = function(n = 500, seed){
   require(bridgedist)
   set.seed(seed)
   L = matrix(rep(NA, n*2), nrow = n)
   for(i in 1:2){
-    #  L[,i] = 2*rbinom(n,1,0.5)-1
-    L[,i] = runif(n,-1,1)
+      L[,i] = runif(n,-1,1)
   }
   
-  U = rbridge(n)/4
+  U = rbridge(n)/4 #unmeasured confounder
   
   dat = data.frame(L, U)
   return(dat)
 }
+
+#generate the outcome Y, the treatment Z, the compliance level A
+
+#Inputs
+#seed.l controls the randomness of the covariates
+#seed.y controls the randomness of the outcomes
+#sample size controls the number of sample, the default same size is set at 500
+#alpha_n1 and alpha_p1 are alpha^-1 and alpha^+1 respectively
 
 gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha_p1 = 0){
   require(dplyr)
@@ -50,9 +55,10 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   U = cov.gen(n = n, seed = seed.l)[,3]
   
   
-  #assigned the treatement Z. Z = -1 denotes taking treatment negative, Z = 1 denotes taking treatment positive 
-  Z = rbinom(n,1,expit(0.3-2*L[,1]+2*L[,2]))
-  Z = ifelse(Z == 0,1,-1)
+  #generate the treatment Z. 
+  #Z = -1 denotes taking treatment negative, Z = 1 denotes taking treatment positive 
+  Z = rbinom(n,1,expit(0.3-2*L[,1]+2*L[,2])) 
+  Z = ifelse(Z == 0,1,-1) 
   
   
   #generate the 6 PI strata based on L1, Z, and U
@@ -69,11 +75,8 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   mChoices = t(apply(vProb, 1, rmultinom, n = 1, size = 1)) #obtained the observed compliance value A
   
   
-  dat = cbind.data.frame(PI = apply(mChoices, 1, function(x) which(x==1)), Z) #dat is a data frame with 2 column A and Z. 
-  dat$A = rep(NA, nrow(dat))
-  
-  # dat = cbind.data.frame(PI = sample(c(1:6),n,c(0.1,0.1,0.1,0.3,0.1,0.3),replace=TRUE), Z) #dat is a data frame with 2 column A and Z. 
-  #  dat$A = rep(NA, nrow(dat))
+  dat = cbind.data.frame(PI = apply(mChoices, 1, function(x) which(x==1)), Z) 
+  dat$A = rep(NA, nrow(dat)) #dat is a data frame with 2 column A and Z. 
   
   #Determine the compliance level A based on their PI strata and the treatment (Z)
   
@@ -98,7 +101,7 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   L1_p1 = L[dat$Z == 1 & dat$A == 1, 1]
   L2_p1 = L[dat$Z == 1 & dat$A == 1, 2]
   
-  #Density f_(-1) and f(1)
+  #Density of the potential compliers: f_(-1) and f(1)
   set.seed(seed.y)
   y_n1 = rnorm(n_n1, 1+2*(L1_n1 + L2_n1 ), 0.5)
   y_p1 = rnorm(n_p1, 1-0*(L1_p1 + L2_p1 ), 0.5)
@@ -109,14 +112,14 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   L2n1 =  L[dat$Z == -1 & dat$A == 1,2]
   
   y_n12 = rnorm(n1, 3 +(L1n1 + L2n1 ) , 0.5)
-  #  y_n12 = rnorm(n1, -( 0.5) , 1)
-  
+ 
+  # the density of the non-compliers
   n2 = nrow(dat[dat$Z == 1 & dat$A == -1,])
   L1n2 = L[dat$Z == 1 & dat$A == -1,1]
   L2n2 = L[dat$Z == 1 & dat$A == -1,2]
   
   y_p12 = rnorm(n2, -1+L1n2 + L2n2 , 0.5)
-  #  y_p12 = rnorm(n2,  0.5, 1)
+ 
   
   dat$outcome[dat$Z == -1 & dat$A == -1] = y_n1
   dat$outcome[dat$Z == 1 & dat$A == 1] = y_p1
@@ -134,21 +137,16 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   alpha0_p1 <-0#temp_p1[which.min(abs(1-sapply(temp_p1,w2, y = y_p1, alpha1 = alpha_p1, gamma = gamma_p1)))]
   
   ####################
-  
-  # S4_w_p1<-S4_w_n1<-wpdatgen<-wndatgen<-rep(-999,nrow(dat))
-  # S4_w_p1[dat$A == 1& dat$Z == 1]<-rbinom(n_p1,1,w(y_p1,alpha0_p1,alpha_p1))
-  # S4_w_n1[dat$A == -1& dat$Z == -1]<-rbinom(n_n1,1,w(y_n1,alpha0_n1,alpha_n1))
-  # 
-  # wpdatgen[dat$A == 1& dat$Z == 1]<-w(y_p1,alpha0_p1,alpha_p1)
-  # wndatgen[dat$A == -1& dat$Z == -1]<-w(y_n1,alpha0_n1,alpha_n1)
-  
+  #Create the density of outcome for the compliers
   
   dat$PI<-rep(-999,nrow(dat))
   #dat$PI[(S4_w_p1==1) | (S4_w_n1==1) ]<-4
   
-  dat$PI[dat$Z==dat$A]<-4
+  dat$PI[dat$Z==dat$A]<-4 #PI 4 indicates the potential compliers
   
+  #generate gamma
   gamma_n1<-gamma_p1<-NULL
+  
   for(i in 1:n_n1){
     temp_y_n1<-rnorm(5000, 1+2*(L1_n1[i] + L2_n1[i] ), 0.5)
     gamma_n1[i]<-mean(w(temp_y_n1,alpha0_n1,alpha_n1))
@@ -165,15 +163,13 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   
   dat$gamma<-dat$gamma_n1+dat$gamma_p1
   
-  #sgamma_n1 = mean(dat$PI[dat$A == -1& dat$Z == -1]==4)  #PI_prop[4]/sum(PI_prop[1],PI_prop[4], PI_prop[5])
-  #sgamma_p1 = mean(dat$PI[dat$A == 1& dat$Z == 1]==4)  #PI_prop[4]/sum(PI_prop[2], PI_prop[4], PI_prop[6])
   
-  ##### sampling the outcome for compliers (with Z = 1 and Z = -1)
-  #We are going to generate the sample of fmIV and fsIV by using the accept-reject method 
+  ##### sampling the outcome for compliers (with Z = 1 and Z = -1) ########
+  #We are going to generate the sample of f^+_IV (complier taking treatment 1) and f^-1_IV (compliers taking treatment -1) by using the accept-reject method 
   # (https://en.wikipedia.org/wiki/Rejection_sampling)
   
   
-  #generate the sample outcome (y) for negative treatmet PI 4 (fsIV) 
+  #generate the sample outcome (Y) for negative treatment for PI=4 (f^-1_IV) 
   M = 3.5
   #The mean of treatment each subject in the simulation depends on the 2 covariates. 
   L4_n1 = L[dat$PI ==4& dat$Z == -1,]
@@ -225,21 +221,24 @@ gen.compl.data = function(seed.l, seed.y, sample.size = 500, alpha_n1 = 0, alpha
   if(dat$outcome %>% is.na() %>% sum()!= 0){
     warning("there are NAs in the simulated data")
   }
+  
+  #return the data set
   dat$L1 = L[,1]
   dat$L2 = L[,2]
   dat$U = U
   return(dat)
 }
 
-
+### Calculate the counterfactual outcome 
 #Based on the generated data set from the gen.compl.data, we generate the potential outcome when the treatment Z is switchted.
 #dat2 is the data that are generated from the gen.compl.data function
+
 gen.switch.IV = function(seed.y, alpha_n1 = 0, alpha_p1 = 0, dat2){
   require(dplyr)
   dat = dat2[,c("PI","L1", "L2")] 
   L= as.matrix(dat[,c("L1","L2")])
   
-  dat$Z = -1*dat2$Z
+  dat$Z = -1*dat2$Z #switch the treatment
   #Determine the compliance level A based on their PI strata and the treatment (Z)
   
   dat$A[dat$PI == 4] = dat$Z[dat$PI == 4]
