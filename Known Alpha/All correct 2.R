@@ -122,10 +122,10 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
                     cross = 10, scale =  F) #fitting IPW model
     
     mod.tchetgen = wsvm(as.factor(lab2) ~ L1 + L2, data = dat[dat$A!=0,], case.weights = abs(dat$w2[dat$A!=0]), kernel = "linear", 
-                        cross = 10, scale =  F)
+                        cross = 10, scale =  F) #fitting IVT model
     
     mod.owl = wsvm(as.factor(lab3) ~ L1 + L2, data = dat, case.weights = abs(dat$w3), kernel = "linear", 
-                   cross = 10, scale =  F)
+                   cross = 10, scale =  F) #fitting OWL model
     
     #####################################################################################
     ########################### Models Evaluation #######################################
