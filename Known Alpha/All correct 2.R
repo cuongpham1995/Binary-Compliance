@@ -1,4 +1,12 @@
 #The case where all of the parameters are correctly specified
+
+#Inputs: seed.l controls the randomness of the covariate L
+#        seed.y controls the randomness of the outcome Y
+#        alpha_n1 is the sensitivity parameter for alpha^- 
+#        alpha_p1 is the sensitivity parameter for alpha^+ 
+#        alpha0_n1 and alpha0_p1 is always set at 0
+#        size controls the sample size of the simulation
+
 bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 = 0, alpha0_p1 = 0, size){
   tryCatch({
     require(locClass)
@@ -8,7 +16,12 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     require(hal9001)
     require(nnet)
     
-    #we create train data set
+    ###################################################################################
+    ######################### Training Model ##########################################
+    ###################################################################################
+    
+    #Part I: create data set  
+    #Create train data set
     dat1 = gen.compl.data(seed.l = seed.l, seed.y = seed.y, alpha_n1 = alpha_n1, 
                           alpha_p1 = alpha_p1,  sample.size = size)
     dat = dat1
@@ -20,23 +33,29 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     #calculate the weight w+ for Z = 1 and w- for Z = -1
     dat$wd = ifelse(dat$Z == -1, w(dat$outcome, alpha0_n1, alpha_n1), w(dat$outcome, alpha0_p1, alpha_p1))
     
+    #Part II: Estimate nuisance parameters
+    #All nuisance parameters are correctly specified.
     
-    ############calculate propensity score
+    ## calculate the propensity score f(Z|X)
     #propensity score is correctly specified
+    
     mod.logit  = glm(as.factor(Z) ~ L1 + L2, data = dat, family = binomial(link = logit))
     fz = predict(mod.logit, type = "response")
     fz = ifelse(dat$Z == 1, fz, 1 - fz)
     dat$fz = fz   #propensity score
-     #dat$fz =  #rep(0.1, size)
     
-    #probabiltiy of A given Z and L are correctly specified 
+    ## calculate the probability of A given Z and L are correctly specified 
     #f(A|Z,L) are correctly specified
     
     mod.multi = multinom(A ~ L1 + L2 + Z, data = dat)
     faz = predict(mod.multi, type = "prob")
     dat$faz = ifelse(dat$Z == 1,faz[,3],faz[,1]) #f(A = 1| Z = 1, X) and f(A = -1| Z = -1,X); we don't consider the case f(A = 0| Z, L)  
-    #dat$faz = rep(0.9, size) 
-    ############### Doubly Robust Estimator##############################
+  
+    
+    #Part III: Fitting model
+    
+    #Implement Doubly Robust Estimator (the MR method)#
+
     dat.PI = dat #make a copy of dat.PI
     
     #calculate Q^+(X) = E[yw+ | A = 1, Z = 1, L1, L2]
@@ -82,25 +101,25 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     dat.PI$w = dat.PI$Z*(term.p - term.n) #the weight for SVM is Z*delta
     dat.PI$lab = sign(dat.PI$w)*dat.PI$Z
     
+    #fitting the multiply robust model 
     mod.mr = wsvm(as.factor(lab) ~ L1 + L2, data = dat.PI, case.weights = abs(dat.PI$w), kernel = "linear", 
                   cross = 10, scale =  F)
     
-    #############################################################
-    #############################################################
-    #tchetgen and proportion and OWL method
+    #Implement the IPW, IVT, and OWL method #
     
-    dat$w = (dat$A*(dat$Z+dat$A)*dat$outcome*dat$wd)/(2*dat$gamma*dat$fz*dat$faz+2*(dat$gamma==0)) # proposed weight
-    dat$w2 = (dat$Z*dat$A*dat$outcome)/dat$fz #Tchetgen weight
+    dat$w = (dat$A*(dat$Z+dat$A)*dat$outcome*dat$wd)/(2*dat$gamma*dat$fz*dat$faz+2*(dat$gamma==0)) # IPW weight
+    dat$w2 = (dat$Z*dat$A*dat$outcome)/dat$fz #IVT weight
     dat$w3 = dat$outcome/dat$fz #OWL weight
     
-    dat$lab = sign(dat$w)*dat$Z
+    
+    dat$lab = sign(dat$w)*dat$Z 
     dat$lab2 = sign(dat$w2)*dat$Z
     dat$lab3 = sign(dat$w3)*dat$Z
     
     
     #models building
     mod.prop = wsvm(as.factor(lab) ~ L1 + L2, data = dat[dat$A==dat$Z,], case.weights = abs(dat$w[dat$A==dat$Z]), kernel = "linear", 
-                    cross = 10, scale =  F)
+                    cross = 10, scale =  F) #fitting IPW model
     
     mod.tchetgen = wsvm(as.factor(lab2) ~ L1 + L2, data = dat[dat$A!=0,], case.weights = abs(dat$w2[dat$A!=0]), kernel = "linear", 
                         cross = 10, scale =  F)
@@ -108,19 +127,22 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     mod.owl = wsvm(as.factor(lab3) ~ L1 + L2, data = dat, case.weights = abs(dat$w3), kernel = "linear", 
                    cross = 10, scale =  F)
     
-    ###########################################################################################################
-    ############################################## Testing ####################################################
-    ###########################################################################################################
+    #####################################################################################
+    ########################### Models Evaluation #######################################
+    #####################################################################################
     
-    #obtained the test data set 
+    
+    # Part I: Obtained the test data set 
     #note that we set the seed.l differs from the one that we use to generate the train set. This will make sure that the model is not 
-    #overfitting.
+    #over fitting.
     
     dat1.test = gen.compl.data(seed.l = seed.l*2, seed.y = seed.y, alpha_n1 = alpha_n1, alpha_p1 = alpha_p1, sample.size = size)
     dat2.test = gen.switch.IV(seed.y = seed.y*3, alpha_n1 = alpha_n1, alpha_p1 = alpha_p1, dat2 = dat1.test)
     dat.test =  left_join(dat1.test, dat2.test, by = c("L1", "L2", "PI"), suffix = c("",".2"))
     
-    #Assigning the treatment based on the proposed method
+    #Part II: Predicting on the test data set.
+    
+    #Assigning the treatment based on the IPW method
     fitted.prop = predict.wsvm(mod.prop, newdata = dat.test[,c("L1", "L2")])
     fitted.prop = as.numeric(as.character(fitted.prop))
     
@@ -128,16 +150,17 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     fitted.owl = predict.wsvm(mod.owl, newdata = dat.test[,c("L1","L2")])
     fitted.owl = as.numeric(as.character(fitted.owl))
     
-    #assigning the treatment based on proposed method in Tchetgen's paper
+    #assigning the treatment based on the IVT method
     fitted.tchetgen = predict.wsvm(mod.tchetgen, newdata = dat.test[,c("L1", "L2")])
     fitted.tchetgen = as.numeric(as.character(fitted.tchetgen))
     
-    #assigning the treatment based on the robust estimator
+    #assigning the treatment based on the MR method
     fitted.mr = predict.wsvm(mod.mr, newdata = dat.test[,c("L1","L2")])
     fitted.mr = as.numeric(as.character(fitted.mr))
     
-    #Calculate the empirical value function for the regime D: V[D(L)] = E[ I{D(L) = 1}*E[Y(1)|L, U] + I{D(L) = -1}*E[Y(-1)|L, U] ]
-    #the value function using the proposed method in Tchetgen
+    # Part III: Calculate the empirical value function for the regime D: V[D(L)] = E[ I{D(L) = 1}*E[Y(1)|L, U] + I{D(L) = -1}*E[Y(-1)|L, U] ]
+    
+    #the value function using IVT method
     value.tchetgen = ifelse(fitted.tchetgen[dat.test$PI == 4] == dat.test$Z[dat.test$PI == 4], dat.test$outcomec[dat.test$PI == 4]
                             , dat.test$outcomec.2[dat.test$PI == 4])
     value.tchetgen.mc = mean(value.tchetgen,na.rm = T)
@@ -158,7 +181,7 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     value.mr.mc = mean(value.mr, na.rm = T)
     
     
-    #Obtain the correct classification rate
+    # Part IV: Estimate the correct classification rate
     
     #the true assigned treatment
     opt.regime = ifelse(dat.test$outcomec > dat.test$outcomec.2, dat.test$Z, dat.test$Z.2)
@@ -183,12 +206,8 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     #the maximal value function
     true.value.func = mean(pmax(dat.test$outcomec, dat.test$outcomec.2),na.rm = T)
     
+    # Part V: Estimate the value functions
     
-    
-    ###########################Calculate mr value function##################################
-    ########################################################################################
-    
-    #calculate the value function using the multiple robust method
     test.df = dat.test
     
     #calculate the f(Z|L)
@@ -212,8 +231,8 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     test.df$I = fitted.prop == test.df$Z 
     test.df$Ie = fitted.tchetgen == dat.test$Z
     test.df$Ir = fitted.mr == dat.test$Z
-    #calculate E[yw^z/p(A|Z,X)] (the kappa term) using HAL model
     
+    #calculate E[yw^z/p(A|Z,X)] (the kappa term) using HAL model
     hal.mod1 = fit_hal(X = matrix(c(rep(1, length(test.df$L1)),test.df$L1, test.df$L2, test.df$Z), ncol = 4),
                        Y = I(test.df$outcome*test.df$wd2/(test.df$faz*test.df$gamma + 2*(test.df$gamma == 0)) ), family = "gaussian", yolo = F)
     
@@ -223,7 +242,7 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     
     test.df$EAYwp = predict(hal.mod1, new_data = matrix(c(rep(1, length(test.df$L1)),test.df$L1, test.df$L2, rep(1, length(test.df$L1))), ncol = 4))
     
-    #### get gamma value
+    #### estimate gamma
     
     mod.lm = lm(outcome ~ L1 + L2, data = test.df[test.df$Z == 1 & test.df$A == 1, ])
     sum.modlm = summary(mod.lm)
@@ -262,32 +281,29 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     test.df$p.gamma = ifelse(test.df$Z == 1, test.df$p.gammap, test.df$p.gamman)
     test.df$p.gamma[test.df$PI == -999] <- 0
     
-    ############ putting everything together ############################  
+    # Putting everything together to estimate the value function   
     term1 = (test.df$I*test.df$outcome*test.df$wd2)/(test.df$p.gamma*test.df$fz*test.df$faz+2*(test.df$p.gamma==0) )
     
     term2.1 = (fitted.prop == test.df$Z)*test.df$EAYw/test.df$fz
     term2.2 = (fitted.prop == 1)*test.df$EAYwp + (fitted.prop == -1)*test.df$EAYwn
-    print(mean(term2.1))
-    print(mean(term2.2))
+
     
     term3.1 = (fitted.prop == 1)*test.df$deltap*(test.df$A == test.df$Z & test.df$Z == 1)*(test.df$wd2 - test.df$p.gamma)/(test.df$fz*test.df$faz)
     term3.2 = (fitted.prop == -1)*test.df$deltan*(test.df$A == test.df$Z & test.df$Z == -1)*(test.df$wd2 - test.df$p.gamma)/(test.df$fz*test.df$faz)
-    print(mean(term3.1))
-    print(mean(term3.2))
+
     
     
     term4.1 = (test.df$A == test.df$Z)*(fitted.prop == test.df$Z)*test.df$delta/(test.df$fz*test.df$faz)
     term4.2 = (test.df$Z ==1)*(fitted.prop == test.df$Z)*test.df$deltap/test.df$fz + 
       (test.df$Z == -1)*(fitted.prop == test.df$Z)*test.df$deltan/test.df$fz
-    
-    print(mean(term4.1))
-    print(mean(term4.2))
+
     
     #value function
-    #calculate the value function using the robust estimator function formula
+    
+    # MR estimator of value function
     value.function.mr = mean(term1 - (term2.1 - term2.2) - (term3.1 + term3.2) - (term4.1 - term4.2))
     
-    value.function.est = mean(term1) #caluclate value function using regular value function formula (non robust)
+    value.function.est = mean(term1) # IPW estimator of value function
     
     #calculate the value function for the method proposed in Eric's using regular value function formula (non-robust)
     value.tchetgen.th = mean((test.df$Ie*test.df$outcome*test.df$wd2)/(test.df$p.gamma*test.df$fz*test.df$faz+2*(test.df$p.gamma==0) ))
@@ -313,5 +329,6 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     return(NA)
   })
 }
+
 
 bi.sim.correct(564,267,alpha_n1 = 0, alpha_p1 = 0, size = 2000)
