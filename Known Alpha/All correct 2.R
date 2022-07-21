@@ -45,7 +45,7 @@ bi.sim.correct = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 =
     dat$fz = fz   #propensity score
     
     ## calculate the probability of A given Z and L are correctly specified 
-    #f(A|Z,L) are correctly specified
+    #f(A|Z,L) is correctly specified
     
     mod.multi = multinom(A ~ L1 + L2 + Z, data = dat)
     faz = predict(mod.multi, type = "prob")
