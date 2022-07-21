@@ -50,7 +50,7 @@ bi.sim.wrong = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 = 0
     #Part III: Fitting model
     
     #Implement Doubly Robust Estimator (the MR method)
-    dat.PI = dat #make a copy of dat.PI
+    dat.PI = dat #make a copy of dat
     
     #calculate Q^+(X) = E[yw+ | A = 1, Z = 1, L1, L2]
     #Q+(X) and gamma+(X) are correctly specified
