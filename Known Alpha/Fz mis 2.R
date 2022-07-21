@@ -48,8 +48,6 @@ bi.sim.fz.mis = function(seed.l, seed.y, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 = 
     fz = ifelse(dat$Z == 1, fz, 1 - fz)
     dat$fz = fz #propensity score
     
-    
-    
     #specify correctly f(A|Z,X)
     mod.multi = multinom(A ~ Z + L1 + L2, data = dat)
     faz = predict(mod.multi, type = "prob")
