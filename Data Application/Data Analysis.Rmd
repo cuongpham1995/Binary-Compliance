@@ -13,6 +13,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Prepare the data set
 ### Import data set
 
+This is the old codes not being used in the paper
+
 ```{r}
 #this function w, generate the w(alpha1, alpha0, y)
 w<-function(y, alpha0, alpha1){
