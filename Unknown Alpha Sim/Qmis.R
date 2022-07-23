@@ -1,9 +1,10 @@
-#trial 1 
 
-####This file contains the functions that use in the binary compliance simulation
-####In line 42, we can find the function "gen.compl.data" This is the function that generate the binary compliance data
-####In line 194, we can find the function "svm.coef". This function returns the equation for decision boundary line for svm
 #########################################################################
+#################### Generative model ##################################
+#########################################################################
+
+#This part is similar to the Data Generator 2.R in the known alpha folder
+
 
 expit<-function(x){
   exp(x)/(1+exp(x))
@@ -398,11 +399,12 @@ gen.switch.IV = function(seed.y, alpha_n1 = 0, alpha_p1 = 0, dat2){
 }
 
 
+
 #########################################################################################################
-###################### Function that produces results ###############################################
+###################### Simulate for a known alpha ###############################################
 #####################################################################################################
-#true.al_n1 = 0.5
-#true.al_p1 = -0.5
+
+#This code is similar to the Q mis 2.R in known alpha folder
 
 bi.sim.Q.mis = function(seed.l, seed.y, true.al_n1, true.al_p1, alpha_n1 = 0, alpha_p1 = 0,alpha0_n1 = 0, alpha0_p1 = 0, size){
   tryCatch({
@@ -696,9 +698,10 @@ bi.sim.Q.mis = function(seed.l, seed.y, true.al_n1, true.al_p1, alpha_n1 = 0, al
 }
 
 
-############################################################################
-#########################Simulation#########################################
-############################################################################
+
+###################################################################
+#############  Sensitivity analysis for different alpha ###########
+###################################################################
 
 SLURM_ID <- as.numeric(Sys.getenv("SLURM_ARRAY_TASK_ID"))
 

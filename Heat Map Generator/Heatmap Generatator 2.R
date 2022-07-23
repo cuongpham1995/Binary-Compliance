@@ -1,4 +1,4 @@
-
+#generat the plots that are used in the simulation part for unknown alpha
 library(ggplot2)
 library(gridExtra)
 library(latex2exp)
@@ -23,10 +23,18 @@ get.dat = function(path, n){
 }
 
 
-#specify the path 
+#specify the path for each cases
+
+#path to when all nuisance parameters are correctly specified 
 path.all.correct = "C:\\Users\\cpham\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 all correct"
+
+#path to the case where f(A|Z) is misspecified
 path.fz.mis = "C:\\Users\\cpham\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 fz mis"
+
+#path to the case where f(A|Z,X) is misspecified
 path.faz.mis = "C:\\Users\\cpham\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 faz mis"
+
+#path to the case where Q(Z,X) is misspecified
 path.Q.mis = "C:\\Users\\cpham\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 6 (New)\\alpha0 correct\\output_-0.5 0.5 500 Q mis"
 #path.all.wrong = "C:\\Users\\cpham\\Box\\Cuong Pham-Projects\\BlueHive\\Simulation 5\\output_-0.5 0.5 500 all correct"
 
