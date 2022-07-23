@@ -1,6 +1,6 @@
 ############################################################################################
 ############ The one that generates them all ################
-
+#this generates for plot for the cases where we included alpha_0s
 
 library(ggplot2)
 library(gridExtra)
