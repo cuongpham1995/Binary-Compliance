@@ -517,11 +517,8 @@ bi.sim.Q.mis = function(seed.l, seed.y, true.al_n1, true.al_p1, alpha_n1 = 0, al
     mod.owl = wsvm(as.factor(lab3) ~ L1 + L2, data = dat, case.weights = abs(dat$w3), kernel = "linear", 
                    cross = 10, scale =  F)
     
-    ###########################################################################################################
-    ############################################## Testing ####################################################
-    ###########################################################################################################
-    #true.al_n1 = 0.5
-    #true.al_p1 = -0.5
+   ############## Testing #################################
+    
     dat1.test = gen.compl.data(seed.l = seed.l, seed.y = seed.y, alpha_n1 = true.al_n1, alpha_p1 = true.al_p1, sample.size = size)
     dat2.test = gen.switch.IV(seed.y = seed.y*3, alpha_n1 = true.al_n1, alpha_p1 = true.al_p1, dat2 = dat1.test)
     dat.test =  left_join(dat1.test, dat2.test, by = c("L1", "L2", "PI"), suffix = c("",".2"))
