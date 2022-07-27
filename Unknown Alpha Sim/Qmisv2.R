@@ -1,8 +1,6 @@
-#trial 1 
-
-####This file contains the functions that use in the binary compliance simulation
-####In line 42, we can find the function "gen.compl.data" This is the function that generate the binary compliance data
-####In line 194, we can find the function "svm.coef". This function returns the equation for decision boundary line for svm
+#This functions allows for an addition parameters alpha_0s. 
+#We do not use this code in the paper. 
+#The nuisance parameter Q(Z,X) is misspecified
 #########################################################################
 
 expit<-function(x){
