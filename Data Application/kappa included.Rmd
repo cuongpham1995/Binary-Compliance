@@ -1,0 +1,618 @@
+---
+title: "data application super learner kappa"
+author: "Cuong Pham"
+date: "2024-09-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+
+```{r}
+library(latex2exp)
+library(gridExtra)
+#this function w, generate the w(alpha1, alpha0, y)
+w<-function(y, alpha0, alpha1){
+  expit(alpha0 +alpha1*y)
+}
+expit<-function(x){
+  exp(x)/(1+exp(x))
+}
+dat.coc.bi = read.csv("/home/cpham/R61/datENGAGE.csv")
+#the function fit.compliance.mod.alc applies the four methods (IPW, MR, IVT, OWL) on the dat.coc.bi data set for a fixed value of the sensitivity parameter alpha
+
+#Inputs:
+#seed: control how we partition the data into test and train set 
+#alpha0_n1 and alpha0_p1: these values are always kept at 0. 
+#alpha_n1 and alpha_p1: the sensitivity parameters alpha^-1 and alpha^+1
+#kernel.type: the kernel type for the svm algorithm
+
+fit.compliance.mod.alc.kappa = function(seed, alpha0_n1 = 0, alpha0_p1 = 0, alpha_n1, alpha_p1, kernel.type = "linear"){
+  tryCatch({ set.seed(seed)
+    require(locClass)
+    require(dplyr)
+    require(matrixStats)
+    require(hal9001)
+    require(nnet)
+    require(SuperLearner)
+    
+    
+    
+    dat =  as.data.frame(dat.coc.bi)
+    colnames(dat) = c("L1", "L2", "L3", "L4", "L5", "L6", "L7", "Z", "A", "outcome")
+    dat$train = rbinom(nrow(dat), size = 1, prob = 0.7) #perform cross validation (70% train and 30% test set)
+    
+    #calculate the weight w+ for Z = 1 and w- for Z = -1
+    dat$wd = ifelse(dat$Z == -1, w(dat$outcome, alpha0_n1, alpha_n1), w(dat$outcome, alpha0_p1, alpha_p1))
+    dat$wd2 = ifelse(dat$A != dat$Z, 0, dat$wd)
+    
+    ################# Model training #################################
+    
+    ##calculate the nuisance parameters
+    
+    #propensity score f(Z|X)
+    mod.logit  = glm(as.factor(Z) ~ L1 + L2 + L3 + L4 + L5 + L6 + L7, data = dat , family = binomial(link = logit))
+    fz = predict(mod.logit, newdata = dat, type = "response")
+    fz = ifelse(dat$Z == 1, fz, 1 - fz)
+    dat$fz = fz #propensity score
+    
+    #calculate f(A|Z,X) 
+    mod.multi = multinom(A ~ Z + L1 + L2 + L3 + L4 + L5 + L6 + L7, data = dat, trace = FALSE)
+    faz = predict(mod.multi,newdata = dat ,type = "prob")
+    dat$faz = ifelse(dat$Z == 1,faz[,3],faz[,1]) #f(A|Z,X).
+    
+    #calculate Q+ = E[yw+ | A = 1, Z = 1, L1, L2, L3]
+    #Q+ and gamma+ using super learner (random forest)
+    dat.pos = dat[dat$Z == 1 & dat$A == 1, ]
+    y.pos = dat.pos[,"outcome"]
+    y.pos = (y.pos+1)/2 
+    x.pos = dat.pos[,c("L1", "L2", "L3","L4" ,"L5", "L6", "L7")]
+    sl.pos = SuperLearner(Y = y.pos, X = x.pos, family = binomial(), cvControl = list(V = 5), SL.library = c("SL.ranger" , "SL.glm") )
+    sl.pred = predict(sl.pos, dat[,c("L1", "L2", "L3","L4" ,"L5", "L6", "L7")])$pred 
+  
+  
+    Ey.wp = p.gammap = NA
+    
+    for(i in 1:nrow(dat)){
+      temp.yp = rbinom(5000, 1, sl.pred[i]) #the true model for yp (y positive) has only intercept
+      temp.yp = ifelse(temp.yp == 0, -1, 1)
+      Ey.wp[i] = mean(temp.yp*w(temp.yp,alpha0 = alpha0_p1, alpha1 = alpha_p1)) #calculate E[Yw+| A = Z = 1, L]
+      p.gammap[i] = mean(w(temp.yp, alpha0 = alpha0_p1, alpha1 = alpha_p1)) #calculate gamma+ (E[w+| A = Z = 1, L])
+    }
+    
+    dat$Ey.wp = Ey.wp  #E[Yw+| A = Z = 1, L]
+    dat$p.gammap = p.gammap #E[w+| A = Z = 1, L]
+    
+    #calculate Q- = E[yw- | A = -1, Z = -1, L]
+    #Q- and gamma- are estimated usling super learner (random forest)
+    dat.neg = dat[dat$Z == -1 & dat$A == -1, ]
+    y.neg = dat.neg[,"outcome"]
+    y.neg = (y.neg+1)/2 
+    x.neg = dat.neg[,c("L1", "L2", "L3","L4" ,"L5", "L6", "L7")]
+    sl.neg = SuperLearner(Y = y.neg, X = x.neg, family = binomial(), cvControl = list(V = 5), SL.library = c("SL.ranger") )
+    sl.pred.neg = predict(sl.neg, dat[,c("L1", "L2", "L3","L4" ,"L5", "L6", "L7")])$pred 
+    
+    Ey.wn = p.gamman = NA
+    
+    for(i in 1:nrow(dat)){
+      temp.yn = rbinom(5000, 1, sl.pred.neg)
+      temp.yn = ifelse(temp.yn == 0, -1, 1)
+      Ey.wn[i] = mean(temp.yn*w(temp.yn,alpha0 = alpha0_n1, alpha1 = alpha_n1)) #calculate E[Yw-|A = Z = -1, L]
+      p.gamman[i] = mean(w(temp.yn, alpha0 = alpha0_n1, alpha1 = alpha_n1)) #calculate gamma- (E[w-|A= Z = -1, L]) 
+    }
+    
+    dat$Ey.wn = Ey.wn
+    dat$p.gamman = p.gamman
+    dat$gamma = ifelse(dat$Z == 1, p.gammap, p.gamman)
+    
+    #### Methods Implemented
+    
+    ### Implement the MR method 
+    #multiple robust estimator for E[Y1|PI = 4, L]
+    delta.p = dat$Ey.wp/dat$p.gammap #calculate E[yw+| A=Z=1, L]/E[w+| A=Z=1, L] 
+    term.p = delta.p + (dat$A*(dat$A+dat$Z)*(dat$A + 1))/(4*dat$fz*dat$faz*dat$p.gammap)*(dat$outcome*dat$wd - dat$Ey.wp - delta.p*(dat$wd - dat$p.gammap))
+    
+    #multiple robust estimator for E[Y-1|PI = 4, L]
+    delta.n = dat$Ey.wn/dat$p.gamman
+    term.n = delta.n + (dat$A*(dat$A+dat$Z)*(1 - dat$A))/(4*dat$fz*dat$p.gamman*dat$faz)*(dat$outcome*dat$wd - dat$Ey.wn - delta.n*(dat$wd - dat$p.gamman))
+    
+    dat$delta.p = delta.p
+    dat$delta.n = delta.n
+    dat$delta = ifelse(dat$Z == 1, dat$delta.p, dat$delta.n)
+    
+    dat$mr = dat$Z*(term.p - term.n) #the weight for SVM is Z*delta
+    dat$lab = sign(dat$mr)*dat$Z
+    
+    #model building
+    mod.mr = wsvm(as.factor(lab) ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$train == 1,], case.weights = abs(dat$mr[dat$train==1]), kernel = kernel.type, 
+                  cross = 10, scale =  F)
+    
+    ## Implement IPW, IVT, and OWL method
+    
+    dat$w = (dat$A*(dat$Z+dat$A)*dat$outcome*dat$wd)/(2*dat$gamma*dat$fz*dat$faz) # IPW weight
+    dat$w2 = (dat$Z*dat$A*dat$outcome)/dat$fz #IVT weight
+    dat$w3 = dat$outcome/dat$fz #OWL weight
+    
+    dat$lab = sign(dat$w)*dat$Z
+    dat$lab2 = sign(dat$w2)*dat$Z
+    dat$lab3 = sign(dat$w3)*dat$Z
+    
+     
+    #models building
+    mod.prop = wsvm(as.factor(lab) ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$A==dat$Z & dat$train == 1,], case.weights = abs(dat$w[dat$A==dat$Z & dat$train == 1]), kernel = kernel.type, 
+                    cross = 10, scale =  F) #IPW method
+    
+    mod.tchetgen = wsvm(as.factor(lab2) ~ L1 + L2 + L3 + L4 + L5 +  L6 + L7, data = dat[dat$A!=0 & dat$train == 1,], case.weights = abs(dat$w2[dat$A!=0 & dat$train == 1]), kernel = kernel.type, 
+                        cross = 10, scale =  F) #IVT method
+    
+    mod.owl = wsvm(as.factor(lab3) ~ L1 + L2 + L3  + L4 + L5 +  L6 + L7, data = dat[dat$train == 1,], case.weights = abs(dat$w3[dat$train == 1]), kernel = kernel.type, 
+                   cross = 10, scale =  F) #OWL method
+    
+    ################ Model Evaluation on test set ############################
+     dat$PI = ifelse(dat$Z == dat$A, 1, 0)
+    dat.test = dat[dat$train == 0, ] #test set
+    
+    ##predicting on the test set 
+    
+    #IPW method
+    fitted.prop = predict(mod.prop, newdata = dat.test[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat.test$fitted.prop = as.numeric(as.character(fitted.prop))
+    
+    #OWL method
+    fitted.owl = predict(mod.owl, newdata = dat.test[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat.test$fitted.owl = as.numeric(as.character(fitted.owl))
+    
+    #IVT method
+    fitted.tchetgen = predict(mod.tchetgen, newdata = dat.test[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat.test$fitted.tchetgen = as.numeric(as.character(fitted.tchetgen))
+    
+    #MR method
+    fitted.mr = predict(mod.mr, newdata = dat.test[,c("L1", "L2","L3", "L4", "L5", "L6", "L7")])
+    dat.test$fitted.mr = as.numeric(as.character(fitted.mr))
+    
+     #return(dim(dat))
+    
+    #kappa term
+   # X.mat = matrix(c(rep(1, length(dat$L1)),dat$L1, dat$L2, dat$L3, dat$L4, dat$L5, dat$L6, dat$L7, dat$Z, dat$PI), ncol = 10)
+   # 
+   #  hal.mod1 = fit_hal(X = X.mat, Y = I(dat$outcome*dat$wd/(dat$faz*dat$gamma)), family = "gaussian", fit_control = list(cv_select = T, nfolds = 10, use_min = T))
+   #  
+   #  dat.test$EAYw = predict(hal.mod1, new_data = matrix(c(rep(1, length(dat.test$L1)),dat.test$L1, dat.test$L2, dat.test$L3, dat.test$L4, dat.test$L5, dat.test$L6, dat.test$L7,dat.test$Z, dat.test$PI), ncol = 10)) 
+   #  
+   #  dat.test$EAYwn = predict(hal.mod1, new_data = matrix(c(rep(1, length(dat.test$L1)),dat.test$L1, dat.test$L2, dat.test$L3, dat.test$L4, dat.test$L5, dat.test$L6, dat.test$L7, rep(-1, length(dat.test$L1)), dat.test$PI), ncol = 10))
+   #  
+   #  dat.test$EAYwp = predict(hal.mod1, new_data = matrix(c(rep(1, length(dat.test$L1)),dat.test$L1, dat.test$L2, dat.test$L3, dat.test$L4, dat.test$L5, dat.test$L6, dat.test$L7, rep(1, length(dat.test$L1)), dat.test$PI), ncol = 10))
+   
+    library(glmnet)
+    
+    # Step 1: Prepare the data for glmnet (as matrices)
+    X.mat = as.matrix(cbind(dat$L1, dat$L2, dat$L3, dat$L4, dat$L5, dat$L6, dat$L7, dat$Z, dat$PI))
+    Y.vec = dat$outcome * dat$wd / (dat$faz * dat$gamma)
+    
+    # Step 2: Fit the Lasso model with cross-validation
+    cv.mod1 <- cv.glmnet(X.mat, Y.vec, alpha = 1, family = "gaussian", nfolds = 10)
+    
+    # Step 3: Prepare the test data matrix
+    X.test.mat = as.matrix(cbind(dat.test$L1, dat.test$L2, dat.test$L3, dat.test$L4, dat.test$L5, dat.test$L6, dat.test$L7, dat.test$Z, dat.test$PI))
+    
+    # Step 4: Make predictions using the best lambda from cross-validation
+    dat.test$EAYw = predict(cv.mod1, newx = X.test.mat, s = "lambda.min")
+    
+    # Step 5: Predict with Z = -1
+    X.test.mat_Zn = as.matrix(cbind(dat.test$L1, dat.test$L2, dat.test$L3, dat.test$L4, dat.test$L5, dat.test$L6, dat.test$L7, rep(-1, length(dat.test$L1)), dat.test$PI))
+    dat.test$EAYwn = predict(cv.mod1, newx = X.test.mat_Zn, s = "lambda.min")
+    
+    # Step 6: Predict with Z = 1
+    X.test.mat_Zp = as.matrix(cbind(dat.test$L1, dat.test$L2, dat.test$L3, dat.test$L4, dat.test$L5, dat.test$L6, dat.test$L7, rep(1, length(dat.test$L1)), dat.test$PI))
+    dat.test$EAYwp = predict(cv.mod1, newx = X.test.mat_Zp, s = "lambda.min")
+    
+     
+   
+    ### Multiply robust estimator of the value function #######
+    mr.value = function(fit, dat){
+     
+      term1 = ((fit == dat$Z)*dat$outcome*dat$wd2)/(dat$gamma*dat$fz*dat$faz )
+   
+      term3.1 =  (fit == 1)*dat$delta.p*(dat$A == dat$Z & dat$Z == 1)*(dat$wd - dat$gamma)/(dat$fz*dat$faz)
+      term3.2 = (fit == -1)*dat$delta.n*(dat$A == dat$Z & dat$Z == -1)*(dat$wd - dat$gamma)/(dat$fz*dat$faz)
+      
+      term2.1 = (fit == dat$Z)*dat$EAYw/dat$fz
+     term2.2 = (fit == 1)*dat$EAYwp + (fit == -1)*dat$EAYwn
+     
+    
+      
+      term4.1 = (dat$A == dat$Z)*(fit == dat$Z)*dat$delta/(dat$fz*dat$faz)
+      term4.2 = (dat$Z ==1)*(fit == dat$Z)*dat$delta.p/dat$fz + 
+        (dat$Z == -1)*(fit == dat$Z)*dat$delta.n/dat$fz
+   
+    #value.function.mr = mean(term1 - (term3.1 + term3.2) - (term4.1 - term4.2))
+       value.function.mr = mean(term1 - (term2.1 - term2.2) - (term3.1 + term3.2) - (term4.1 - term4.2))
+      return(value.function.mr)
+    }
+    
+     ######### IPW estimator of the  value function ###########
+    value.function = function(fit, dat){
+      term1 = ((fit == dat$Z)*dat$outcome*dat$wd2)/(dat$gamma*dat$fz*dat$faz )
+      #term1.denom = ((fit == dat$Z)*dat$wd)/(dat$gamma*dat$fz*dat$faz )
+      return( mean(term1)  )
+    }
+    
+   ##### Another estimator of the value function ####
+    value.function2 = function(fit, dat){
+      term4.2 = (dat$Z ==1)*(fit == dat$Z)*dat$delta.p/dat$fz + 
+        (dat$Z == -1)*(fit == dat$Z)*dat$delta.n/dat$fz
+      
+      return(mean(term4.2))
+    }
+    
+    #Estimate the value functions for the four methods (IPW, MR, IVT, and OWL)
+    
+    #Using the MR value function estimator
+    mr.vl.prop = mr.value(fit = dat.test$fitted.prop, dat = dat.test)
+    mr.vl.mr.prop = mr.value( fit =  dat.test$fitted.mr, dat = dat.test)
+    mr.vl.eric = mr.value(fit =  dat.test$fitted.tchetgen, dat = dat.test)
+    mr.vl.owl = mr.value(fit =  dat.test$fitted.owl, dat = dat.test)
+    
+    
+    #Using the IPW value function estimator 
+    vl.prop = value.function(fit =  dat.test$fitted.prop, dat = dat.test)
+    vl.mr.prop = value.function(fit =  dat.test$fitted.mr, dat = dat.test)
+    vl.eric = value.function(fit = dat.test$fitted.tchetgen, dat = dat.test)
+    vl.owl = value.function(fit =  dat.test$fitted.owl, dat = dat.test)
+    
+    #Using the other method
+    vl2.prop = value.function2(fit =  dat.test$fitted.prop, dat = dat.test)
+    vl2.mr.prop = value.function2(fit =  dat.test$fitted.mr, dat = dat.test)
+    vl2.eric = value.function2(fit = dat.test$fitted.tchetgen, dat = dat.test)
+    vl2.owl = value.function2(fit =  dat.test$fitted.owl, dat = dat.test)
+    
+    result = c(mr.vl.prop, mr.vl.mr.prop, mr.vl.eric, mr.vl.owl, vl.prop, vl.mr.prop, vl.eric, vl.owl, vl2.prop, vl2.mr.prop, vl2.eric, vl2.owl)
+    names(result) = c("Value function proposed method (MR)", "Value function MR proposed method (MR)", "Value Function Eric (MR)", "Value Function OWL (MR)", "Value function proposed method", "value function MR proposed method", "Value Function Eric", "Value Function OWL",
+                      "Value function 2 proposed method", "value function 2 MR proposed method", "Value Function 2 Eric", "Value Function 2 OWL")
+    
+    return(result)
+  }, error = function(error_message){
+    message(error_message)
+    return(NA)
+  })
+  
+}
+
+temp.seed = sample(1:2000, 20)
+fit.compliance.mod.alc.kappa(seed = 16, alpha0_n1 = 0, alpha0_p1 = 0, alpha_n1 = 2, alpha_p1 = 2)
+
+
+```
+
+
+## Value Function Sensitivity Analysis
+
+```{r warning=FALSE}
+#Sensitivity Analysis
+#set grid for the possible combinations of alpha
+alpha.grid = expand.grid(alpha_n = seq(-1,1,length.out = 20), alpha_p = seq(-1,1, length.out = 20))
+set.seed(1)
+sampled.seed = sample(1:100000, 500)
+heat.df2 = list()
+
+#obtain the correspondong alphao 0 for each of the alpha1 
+mean(dat.coc.bi$DaysCoc.bi[dat.coc.bi$trt == -1 & dat.coc.bi$compl == -1] == 1)#p(Y = 1| A = - 1, Z = -1) = 0.75
+mean(dat.coc.bi$DaysCoc.bi[dat.coc.bi$trt == 1 & dat.coc.bi$compl == 1] == 1) #p(Y = 1| A = 1,Z = 1) = 0.71
+
+find.alpha0 = function(ps4, p1, alpha1){
+  #ps4 is P(S4|A = Z = z)
+  #p1 is P(Y = 1| A = Z = z)
+  #pn1 is P(Y = -1| A = Z = z)
+  pn1 = 1 - p1
+  a = ps4
+  b= ps4*exp(-alpha1) + ps4*exp(alpha1) - pn1*exp(-alpha1) - p1*exp(alpha1)
+  c = ps4 - pn1 - p1
+  
+  res1 = -log((-b + sqrt(b^2 -4*a*c))/(2*a))
+  res2 = -log((-b - sqrt(b^2 -4*a*c))/(2*a))
+  
+  res = c(res1, res2)
+  return(res[!is.nan(res)] )
+}
+
+#if p(s4 = 0.3) then p()S4|A=Z=-1) = 0.3/0.39
+alpha.grid$alpha0_n = sapply(X =alpha.grid$alpha_n, FUN = find.alpha0, ps4 = 0.3/0.39, p1 =0.75) # find.alpha0(ps4 = 0.3/0.39, p1 = 0.75, pn1 = 0.25, alpha1 = alpha.grid$alpha1_n)
+alpha.grid$alpha0_p = sapply(X =alpha.grid$alpha_p, FUN = find.alpha0, ps4 = 0.3/0.44, p1 =0.71)  
+
+range(alpha.grid$alpha0_n)
+
+for(i in 1:100){
+  print(i)
+  value.all.alpha = mapply(fit.compliance.mod.alc.kappa, seed = sampled.seed[i],  alpha0_n1 = alpha.grid$alpha0_n, alpha0_p1 = alpha.grid$alpha0_p, 
+                           alpha_n1 = alpha.grid$alpha_n, alpha_p1 = alpha.grid$alpha_p) 
+  
+  heat.df = cbind(alpha.grid,t(value.all.alpha))
+   if(sum(is.na(heat.df)) > 0){
+     #Eliminate the bad cases
+    heat.df2[[i]] = 0
+    
+   } else {
+     #calculate the difference of the value function betwwen IPW method and method proposed by Cui and Tchetgen
+    heat.df$diff.IPW.Eric = heat.df$`Value function proposed method (MR)` - heat.df$`Value Function Eric (MR)`
+    #calculate the difference of the value function between the multiply robust estimator  and the method proposed by Cui and Tchetgen
+  heat.df$diff.MR.Eric = heat.df$`Value function MR proposed method (MR)` - heat.df$`Value Function Eric (MR)`
+  
+  #save  the result in a list
+  heat.df2[[i]] = as.matrix(heat.df)  
+  }
+  
+  
+}
+
+#saveRDS(heat.df2, file = "/home/cpham/Binary Compliance/Data Application/extra data kappa/term_kappa_p03.rds")
+#View(heat_df_ps4_03)
+#heat_df_ps4_025_all = heat.df2
+#save(heat_df_ps4_025_all, file = "heat_df_ps4_025_all.rdata")
+#heat_alpha_n1_alpha_p1_n02_n04 = heat.df2
+#save(heat_alpha_n1_alpha_p1_n02_n04, file = "heat_alpha_n1_alpha_p1_n02_n04.rda")
+#heat_alpha_n1_alpha_p1_n06_n08 = heat.df2
+#save(heat_alpha_n1_alpha_p1_n06_n08, file = "heat_alpha_n1_alpha_p1_n06_n08.rda")
+#heat.df2 = heat_df_ps4_025_all
+#load("~/Binary Compliance/Data Application/heat_alpha_n1_alpha_p1_n04_n06.rda")
+
+#heat.df2 <- heat_alpha_n1_alpha_p1_n04_n06 
+#heat.df2 <- heat_alpha_n1_alpha_p1_n02_n04
+#heat.df2 <- heat_alpha_n1_alpha_p1_n06_n08
+#sum up the list in heat.df2
+heat.df.sum = 0
+for(i in 1:100){
+  
+  if(sum(heat.df2[[i]]) != 0){
+     heat.df.temp = heat.df2[[i]]
+  heat.df.sum = heat.df.sum + heat.df.temp
+  }
+ 
+}
+#caclulate the mean of each grid in the heat map
+heat.df.mean = heat.df.sum/100
+#calculate the variance using resampling
+heat.df.diff.sq = 0 
+for(i in 1:100){
+  
+  if(sum(heat.df2[[i]]) != 0){
+    heat.df.temp = (heat.df2[[i]] - heat.df.mean)^2
+   #print(heat.df.temp[[1]][1])
+  heat.df.diff.sq = heat.df.diff.sq + heat.df.temp
+  }
+  
+}
+
+
+#construct the estimated 95% CI
+heat.df.var = (1/99)*heat.df.diff.sq
+heat.df.sd = sqrt(heat.df.var)
+heat.df.lower.bound = heat.df.mean - 1.96*heat.df.sd 
+heat.df.upper.bound = heat.df.mean + 1.96*heat.df.sd 
+heat.df.IPW.Eric = data.frame(alpha_n = heat.df.mean[,"alpha_n"], alpha_p = heat.df.mean[,"alpha_p"] ,est.mean = heat.df.mean[,"diff.IPW.Eric"], lower.bound = heat.df.lower.bound[,"diff.IPW.Eric"], upper.bound = heat.df.upper.bound[,"diff.IPW.Eric"])
+heat.df.IPW.Eric$IPW.greater = ifelse(heat.df.IPW.Eric$est.mean >= 0, T, F)
+heat.df.IPW.Eric$Significant = ifelse(heat.df.IPW.Eric$lower.bound <0 & 0 < heat.df.IPW.Eric$upper.bound, F,T)
+heat.df.MR.Eric = data.frame(alpha_n = heat.df.mean[,"alpha_n"], alpha_p = heat.df.mean[,"alpha_p"] ,est.mean = heat.df.mean[,"diff.MR.Eric"], lower.bound = heat.df.lower.bound[,"diff.MR.Eric"], upper.bound = heat.df.upper.bound[,"diff.MR.Eric"])
+heat.df.MR.Eric$MR.greater = ifelse(heat.df.MR.Eric$est.mean >= 0, T, F)
+heat.df.MR.Eric$Significant = ifelse(heat.df.MR.Eric$lower.bound <0 & 0 < heat.df.MR.Eric$upper.bound, F,T)
+#Plots the difference of value function between the two methods
+#IPW vs Eric
+  plot.IPW1 = ggplot(data = heat.df.IPW.Eric, aes(alpha_n, alpha_p, fill =est.mean)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+  labs(title =  "IPW Method", x = TeX("$\\alpha_1^-$"), y = TeX("$\\alpha_1^+$"), fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20),
+        legend.key.width = unit(1.5,"cm"), plot.title = element_text(size = 25), axis.title = element_text(size = 25), legend.title = element_text(size = 22), legend.text = element_text(size = 20) )
+   
+  plot.IPW2 = ggplot(data = heat.df.IPW.Eric, aes(alpha_n, alpha_p, fill = IPW.greater )) + 
+  geom_tile() + labs(title =  "IPW Method", x = TeX("$\\alpha_1^-$"), y = TeX("$\\alpha_1^+$"), fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), plot.title = element_text(size = 25), axis.title = element_text(size = 25), legend.title = element_text(size = 22), legend.text = element_text(size = 18)) +   scale_fill_manual(values=c("FALSE"="red","TRUE"="turquoise3"))
+    
+  
+  plot.IPW3 = ggplot(data = heat.df.IPW.Eric, aes(alpha_n, alpha_p, fill = Significant )) + 
+  geom_tile() + labs(title =  "Is the difference significant", x= TeX("$\\alpha_1^-$"), y = TeX("$\\alpha_1^+$"), fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+  grid.arrange(plot.IPW1, plot.IPW2, plot.IPW3, ncol = 2)
+#MR vs Eric
+  plot.MR.1 = ggplot(data = heat.df.MR.Eric, aes(alpha_n, alpha_p, fill =est.mean)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+  labs(title =  "MR method", x = TeX("$\\alpha_1^-$"), y = TeX("$\\alpha_1^+$"), fill = "Value Function") + 
+   theme(legend.position = "bottom", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20),
+        legend.key.width = unit(1.5,"cm"), plot.title = element_text(size = 25), axis.title = element_text(size = 25), legend.title = element_text(size = 22), legend.text = element_text(size = 20) )
+   
+  plot.MR.2 = ggplot(data = heat.df.MR.Eric, aes(alpha_n, alpha_p, fill = as.factor(MR.greater) )) + 
+  geom_tile() + labs(title =  "MR method", x = TeX("$\\alpha_1^-$"), y = TeX("$\\alpha_1^+$"), fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), plot.title = element_text(size = 25), axis.title = element_text(size = 25), legend.title = element_text(size = 22), legend.text = element_text(size = 18)) +   scale_fill_manual(values=c("FALSE"="red","TRUE"="turquoise3"))
+  
+  plot.MR.3 = ggplot(data = heat.df.MR.Eric, aes(alpha_n, alpha_p, fill = as.factor(Significant) )) + 
+  geom_tile() + labs(title =  "Is the difference significant?", x = TeX("$\\alpha_1^-$"), y = TeX("$\\alpha_1^+$"), fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12))
+  
+ #  grid.arrange(plot.MR.1, plot.MR.2, plot.MR.3, ncol = 2)
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+#########################################################################
+#estimate the value function using the multiple robust (MR) method
+
+heat.df3 = as.data.frame(heat.df.mean)
+
+heat.df3$IPW.Eric = heat.df3$`Value function proposed method (MR)` >= heat.df3$`Value Function Eric (MR)`
+heat.df3$IPW.Eric2 = heat.df3$`Value function proposed method (MR)` - heat.df3$`Value Function Eric (MR)`
+heat.df3$MR.Eric = heat.df3$`Value function MR proposed method (MR)` >= heat.df3$`Value Function Eric (MR)`
+heat.df3$MR.Eric2 = heat.df3$`Value function MR proposed method (MR)` - heat.df3$`Value Function Eric (MR)`
+
+
+heat.df3$IPW.OWL = heat.df3$`Value function proposed method (MR)` >= heat.df3$`Value Function OWL (MR)`
+heat.df3$IPW.OWL2 = heat.df3$`Value function proposed method (MR)` - heat.df3$`Value Function OWL (MR)`
+heat.df3$MR.OWL = heat.df3$`Value function MR proposed method (MR)` >= heat.df3$`Value Function OWL (MR)`
+heat.df3$MR.OWL2 = heat.df3$`Value function MR proposed method (MR)` - heat.df3$`Value Function OWL (MR)`
+rgn.OWL = range(c(heat.df3$`value function proposed method (MR)`, heat.df3$`Value function MR proposed method (MR)`,
+              heat.df3$`Value Function Eric (MR)`, heat.df3$`Value Function OWL (MR)`)) 
+
+```
+
+### Generate the plots for the tables 
+
+```{r}
+#IPW vs Ivt
+plot.IPW13 = ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill =IPW.Eric2)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+  labs(title =  "IPW Method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = "Value Function" ) + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12) )
+   
+  plot.IPW23 = ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = IPW.Eric)) + 
+  geom_tile() + labs(title =  "IPW Method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = TeX("$d(\\hat{\\pi}_{ipw},\\hat{\\pi}_{ivt} ) >0$")) + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12)) +   scale_fill_manual(values=c("FALSE"="red","TRUE"="turquoise3"))
+    
+#MR vs IVT
+  plot.MR.13 = ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = MR.Eric2)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+  labs(title =  "MR method", x = TeX("$\\alpha_{-1}^Y$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = "Value Function") + 
+   theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12) )
+   
+  plot.MR.23 = ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = MR.Eric )) + 
+  geom_tile() + labs(title =  "MR method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = TeX("$d(\\hat{\\pi}_{mr},\\hat{\\pi}_{ivt} ) >0$")) + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12)) +   scale_fill_manual(values=c("FALSE"="red","TRUE"="turquoise3"))
+  
+     #The difference of the value function between the OWL method and the multiply robust method
+ plot.MR.OWL13 = ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = MR.OWL)) + 
+  geom_tile() + labs(title =  "MR method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = TeX("$d(\\hat{\\pi}_{mr},\\hat{\\pi}_{owl} ) >0$")) + 
+ theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12)) +   scale_fill_manual(values=c("FALSE"="red","TRUE"="turquoise3"))
+ 
+ plot.MR.OWL23 = ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = MR.OWL2)) + 
+  geom_tile()  + scale_fill_gradient(low="white", high="dodgerblue4" ) + 
+    labs(title =  "MR method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = "Value Function") + 
+   theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12) )
+  
+ #the difference of the value function between the OWL method and the IPW method 
+ plot.OWL.IPW13 =  ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = IPW.OWL)) + 
+  geom_tile() + labs(title =  "IPW method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = TeX("$d(\\hat{\\pi}_{ipw},\\hat{\\pi}_{owl} ) >0$")) + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12)) +   scale_fill_manual(values=c("FALSE"="red","TRUE"="turquoise3"))
+ 
+ plot.OWL.IPW23 =  ggplot(data = heat.df3, aes(alpha_n, alpha_p, fill = IPW.OWL2)) + 
+  geom_tile() + scale_fill_gradient(low="white", high="dodgerblue4" ) + labs(title =  "IPW method", x = TeX("$\\alpha_{-1}^{Y}$"), y = TeX("$\\alpha_{+1}^{Y}$"), fill = "Value Function") + 
+  theme(legend.position = "bottom", axis.text.x = element_text(size = 12), axis.text.y = element_text(size = 12),
+        legend.key.width = unit(1.5,"cm"), plot.title = element_text(size = 12), axis.title = element_text(size = 12), legend.title = element_text(size = 12), legend.text = element_text(size = 12) )
+
+   #create the plots that we use in the paper 
+   grid.arrange(plot.MR.13, plot.MR.23, 
+                plot.IPW13, plot.IPW23, ncol = 2)
+   
+   grid.arrange(plot.MR.OWL23, plot.MR.OWL13,
+                plot.OWL.IPW23, plot.OWL.IPW13,ncol = 2)
+   
+   #ENAR paper
+   #grid.arrange(plot.MR.13, plot.MR.23,
+  #              plot.MR.OWL23, plot.MR.OWL13, ncol = 2)
+```
+
+### Generate the table for the value function for ten random points in the heatmap
+
+
+```{r}
+#Sensitivity Analysis
+#set grid for the possible combinations of alpha
+alpha.grid = expand.grid(alpha_n = c(0.0000,0.53, 1.05, 1.47,2.00), alpha_p = c(0.0000,0.53, 1.05, 1.47,2.00))
+set.seed(1)
+sampled.seed = sample(1:100000, 500)
+heat.df2 = list()
+
+#obtain the correspondong alphao 0 for each of the alpha1 
+mean(dat.coc.bi$DaysCoc.bi[dat.coc.bi$trt == -1 & dat.coc.bi$compl == -1] == 1)#p(Y = 1| A = - 1, Z = -1) = 0.75
+mean(dat.coc.bi$DaysCoc.bi[dat.coc.bi$trt == 1 & dat.coc.bi$compl == 1] == 1) #p(Y = 1| A = 1,Z = 1) = 0.71
+
+find.alpha0 = function(ps4, p1, alpha1){
+  #ps4 is P(S4|A = Z = z)
+  #p1 is P(Y = 1| A = Z = z)
+  #pn1 is P(Y = -1| A = Z = z)
+  pn1 = 1 - p1
+  a = ps4
+  b= ps4*exp(-alpha1) + ps4*exp(alpha1) - pn1*exp(-alpha1) - p1*exp(alpha1)
+  c = ps4 - pn1 - p1
+  
+  res1 = -log((-b + sqrt(b^2 -4*a*c))/(2*a))
+  res2 = -log((-b - sqrt(b^2 -4*a*c))/(2*a))
+  
+  res = c(res1, res2)
+  return(res[!is.nan(res)] )
+}
+
+#if p(s4 = 0.3) then p()S4|A=Z=-1) = 0.3/0.39
+alpha.grid$alpha0_n = sapply(X =alpha.grid$alpha_n, FUN = find.alpha0, ps4 = 0.3/0.39, p1 =0.75) # find.alpha0(ps4 = 0.3/0.39, p1 = 0.75, pn1 = 0.25, alpha1 = alpha.grid$alpha1_n)
+alpha.grid$alpha0_p = sapply(X =alpha.grid$alpha_p, FUN = find.alpha0, ps4 = 0.3/0.44, p1 =0.71)  
+
+range(alpha.grid$alpha0_n)
+
+for(i in 1:100){
+  print(i)
+  value.all.alpha = mapply(fit.compliance.mod.alc.kappa, seed = sampled.seed[i],  alpha0_n1 = alpha.grid$alpha0_n, alpha0_p1 = alpha.grid$alpha0_p, 
+                           alpha_n1 = alpha.grid$alpha_n, alpha_p1 = alpha.grid$alpha_p) 
+  
+  heat.df = cbind(alpha.grid,t(value.all.alpha))
+   if(sum(is.na(heat.df)) > 0){
+     #Eliminate the bad cases
+    heat.df2[[i]] = 0
+    
+   } else {
+     #calculate the difference of the value function betwwen IPW method and method proposed by Cui and Tchetgen
+    heat.df$diff.IPW.Eric = heat.df$`Value function proposed method (MR)` - heat.df$`Value Function Eric (MR)`
+    #calculate the difference of the value function between the multiply robust estimator  and the method proposed by Cui and Tchetgen
+  heat.df$diff.MR.Eric = heat.df$`Value function MR proposed method (MR)` - heat.df$`Value Function Eric (MR)`
+  
+  #save  the result in a list
+  heat.df2[[i]] = as.matrix(heat.df)  
+  }
+  
+  
+}
+
+# Sum all data frames in the list
+heat.df.sum = Reduce(`+`, heat.df2)
+
+# Calculate the mean of each grid in the heat map
+heat.df.mean = heat.df.sum / 100
+heat.df.mean = as.data.frame(heat.df.mean)
+heat.df.mean = heat.df.mean %>% round(2)
+
+heat.df.diff.sq = 0 
+for(i in 1:100){
+  
+  if(sum(heat.df2[[i]]) != 0){
+    heat.df.temp = (heat.df2[[i]] - heat.df.mean)^2
+   #print(heat.df.temp[[1]][1])
+  heat.df.diff.sq = heat.df.diff.sq + heat.df.temp
+  }
+  
+}
+
+
+#construct the estimated 95% CI
+heat.df.var = (1/99)*heat.df.diff.sq
+heat.df.sd = sqrt(heat.df.var) %>% round(.,2)
+
+IPW = paste(heat.df.mean$`Value function proposed method (MR)`, " (", heat.df.sd$`Value function MR proposed method (MR)`, ")", sep="")
+MR = paste(heat.df.mean$`Value function MR proposed method (MR)`, " (", heat.df.sd$`Value function MR proposed method (MR)`, ")", sep="")
+IVT =  paste(heat.df.mean$`Value Function Eric (MR)`, " (", heat.df.sd$`Value Function Eric (MR)`, ")", sep="")
+OWL = paste(heat.df.mean$`Value Function OWL (MR)`, " (", heat.df.sd$`Value Function OWL (MR)`, ")", sep="")
+
+alpha = paste( "(", heat.df.mean$alpha_n, ",", heat.df.mean$alpha_p, ")", sep = "")
+
+tab.res = data.frame(alpha = alpha,
+                     IPW = IPW,
+                     MR = MR,
+                     IVT = IVT, 
+                     OWL = OWL)
+
+
+xtable(tab.res)
+```
+
