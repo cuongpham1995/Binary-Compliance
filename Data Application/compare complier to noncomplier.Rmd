@@ -79,7 +79,7 @@ boxplot(dat.coc.bi$emotional_baseline ~ dat.coc.bi$DaysCoc.bi)
 ```{r}
 
 
-complier.cov = function(seed, alpha_n1, alpha_p1,ps4 = 0.3, col, kernel.type = "linear"){
+complier.cov = function(seed, alpha_n1, alpha_p1,ps4 = 0.3, col, trt.pop,  kernel.type = "linear"){
  set.seed(seed)
     require(locClass)
     require(dplyr)
@@ -173,7 +173,7 @@ complier.cov = function(seed, alpha_n1, alpha_p1,ps4 = 0.3, col, kernel.type = "
   #  p.0 = mean(temp.dat$A == temp.dat$Z) #f(A = Z | X = 0)
     
   #  dat$f.a.z.x = ifelse(dat[,col] == 1, p.1, p.0)
-    mu.S4 = mean(dat$gamma[dat$gamma != 0])    
+    mu.S4 = mean(dat$gamma[dat$gamma != 0 & dat$A == trt.pop])    
    # mean(dat[dat$gamma != 0,col])
   #  mean(dat[dat$gamma != 0,col]*(dat$gamma[dat$gamma != 0]/mu.S4))
    # return(list(complier = mean(dat[dat$gamma != 0,col]*(dat$gamma[dat$gamma != 0]/mu.S4)), 
@@ -181,11 +181,12 @@ complier.cov = function(seed, alpha_n1, alpha_p1,ps4 = 0.3, col, kernel.type = "
  # return(list(population =mean(dat[,col]),
   #            complier = mean(dat[dat$gamma != 0,col]*(dat$gamma[dat$gamma != 0]/mu.S4)) ) )
  
-     return(list(comp.mean = mean(dat[dat$gamma != 0,col]*(dat$gamma[dat$gamma != 0]/mu.S4)),
-                 comp.sd = sd(dat[dat$gamma != 0,col]*(dat$gamma[dat$gamma != 0]/mu.S4)) ))   
+     return(list(comp.mean = mean(dat[dat$gamma != 0 & dat$A == trt.pop,col]*(dat$gamma[dat$gamma != 0 & dat$A == trt.pop]/mu.S4)),
+                 comp.sd = sd(dat[dat$gamma != 0 & dat$A == trt.pop,col]*(dat$gamma[dat$gamma != 0 & dat$A == trt.pop]/mu.S4)) ))   
 }
     
-  
+
+complier.cov(seed = 22, alpha_n1 = 0.5, alpha_p1 = 0.5, ps4 = 0.3, col = "L1", trt.pop = -1)  
 ```
 
 
@@ -199,14 +200,16 @@ complier.cov = function(seed, alpha_n1, alpha_p1,ps4 = 0.3, col, kernel.type = "
 #L6 = general health
 #L7 = Emotional baseline
 
-alpha.grid = expand.grid(alpha_n = c(0.0000, 0.5, 1), alpha_p = c(0.0000, 0.5, 1))
-alpha.grid = alpha.grid[c(1,9),]
+#creating table 5 in the paper
+
+alpha.grid = expand.grid(alpha_n = c(0.0000, 0.5, 1,2), alpha_p = c(0.0000, 0.5, 1,2))
+alpha.grid = alpha.grid[c(6,11,16),]
 
 #boxplot(dat.coc.bi$emotional_baseline[dat.coc.bi$DaysCoc.bi == -1])
 n.sim = 100
 
 covarites = c("L1", "L2", "L3", "L4", "L5", "L6", "L7")
-tab = matrix(nrow = length(covarites), ncol = nrow(alpha.grid))
+tab.full = matrix(nrow = length(covarites), ncol = nrow(alpha.grid))
 
 for(j in 1:length(covarites)){
   print(j)
@@ -215,13 +218,13 @@ L1.sd = L1.mean
 
 for(i in 1:n.sim){
   #print(i)
-  temp = mapply(seed = i , complier.cov, alpha_n1 = alpha.grid$alpha_n, alpha_p1 = alpha.grid$alpha_p, col = covarites[j])
+  temp = mapply(seed = i , complier.cov, alpha_n1 = alpha.grid$alpha_n, alpha_p1 = alpha.grid$alpha_p, col = covarites[j], trt.pop = 1)
   
   L1.mean[i,] = unlist(temp[1,])
   L1.sd[i,] = unlist(temp[2,])
 }
 
-tab[j,] = paste0( round(apply(L1.mean,2,mean),2) , "(", round(apply(L1.sd,2,mean),2),")", sep = "")
+tab.full[j,] = paste0( round(apply(L1.mean,2,mean),2) , "(", round(apply(L1.sd,2,mean),2),")", sep = "")
 }
 
 
@@ -231,17 +234,61 @@ tab[j,] = paste0( round(apply(L1.mean,2,mean),2) , "(", round(apply(L1.sd,2,mean
 
 ```{r}
 
-population = dat.coc.bi %>% mutate(complier = I(trt == compl)) %>% summarise(Race = mean.sd(aa), Sex = mean.sd(male), higheduc = mean.sd(higheduc),  smoke_baseline = mean.sd(smoke_baseline), Txready = mean.sd(TxReadiness_baseline), Health = mean.sd(GH_baseline), Emo = mean.sd(emotional_baseline))
+population = dat.coc.bi %>% mutate(complier = I(trt == compl)) %>% filter(complier == T & trt == 1) %>% summarise(Race = mean.sd(aa), Sex = mean.sd(male), higheduc = mean.sd(higheduc),  smoke_baseline = mean.sd(smoke_baseline), Txready = mean.sd(TxReadiness_baseline), Health = mean.sd(GH_baseline), Emo = mean.sd(emotional_baseline))
 
-tab = as.data.frame(tab)
+tab = as.data.frame(tab.full)
 
 tab$population = t(population)
 
 tab$covariates = c("Race", "Sex", "Education", "Smoke", "Treatment Readiness", "General Health", "Emotional Readiness")
-tab = tab[,c(4,1:3)]
+tab = tab[,c(5,1:4)]
 
+tab$Prevalence = NA
 #creating table 5
-tab %>% xtable()
+tab[,c(1,2,5,6)] %>% xtable()
+
+#supplementary table
+tab[,c(1,3:5)] %>% xtable()
 
 ```
+
+```{r}
+
+tab.full2 = matrix(nrow = length(covarites), ncol = nrow(alpha.grid))
+
+for(j in 1:length(covarites)){
+  print(j)
+L1.mean = matrix(nrow = n.sim, ncol = nrow(alpha.grid))
+L1.sd = L1.mean 
+
+for(i in 1:n.sim){
+  #print(i)
+  temp = mapply(seed = i , complier.cov, alpha_n1 = alpha.grid$alpha_n, alpha_p1 = alpha.grid$alpha_p, col = covarites[j], trt.pop = -1)
+  
+  L1.mean[i,] = unlist(temp[1,])
+  L1.sd[i,] = unlist(temp[2,])
+}
+
+tab.full2[j,] = paste0( round(apply(L1.mean,2,mean),2) , "(", round(apply(L1.sd,2,mean),2),")", sep = "")
+}
+```
+
+```{r}
+population.An1 = dat.coc.bi %>% mutate(complier = I(trt == compl)) %>% filter(complier == T & trt == -1) %>% summarise(Race = mean.sd(aa), Sex = mean.sd(male), higheduc = mean.sd(higheduc),  smoke_baseline = mean.sd(smoke_baseline), Txready = mean.sd(TxReadiness_baseline), Health = mean.sd(GH_baseline), Emo = mean.sd(emotional_baseline))
+
+tab2 = as.data.frame(tab.full2)
+
+tab2$population = t(population.An1)
+
+tab2$covariates = c("Race", "Sex", "Education", "Smoke", "Treatment Readiness", "General Health", "Emotional Readiness")
+tab2 = tab2[,c(5,1:4)]
+
+tab2$Prevalence = NA
+#creating table 6
+tab2[,c(1,2,5,6)] %>% xtable()
+
+tab2[,c(1,3:5)] %>% xtable()
+```
+
+
 
