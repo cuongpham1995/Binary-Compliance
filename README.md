@@ -52,3 +52,6 @@ The data application can be found at the ENGAGE folder in Box.
 "kappa include.Rmd" runs the cases where we include the kappa(Z,X) in the value function. 
 
 "compare compiler to noncomplier.Rmd" is the codes to characterizing the compliers.
+
+## Misspecification of sensitivity parameter
+We assess the sensitivity of our approach to the misspecification of the sensitivity model 
