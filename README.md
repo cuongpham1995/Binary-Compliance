@@ -48,3 +48,7 @@ The codes from from Unknow Alpha folders will give us 500 csv files for each cas
 "Data Analysis Super Learner Try.Rmd" import, clean the data and apply the proposed methods, OWL method, and Eric's method to this data set. It will create the heat maps in the section 5 in the paper. 
 
 The data application can be found at the ENGAGE folder in Box.
+
+"kappa include.Rmd" runs the cases where we include the kappa(Z,X) in the value function. 
+
+"compare compiler to noncomplier.Rmd" is the codes to characterizing the compliers.
